@@ -1,7 +1,7 @@
 <h1 align="center">
   <img src="https://snapflix.indevs.in/icon.png" alt="SnapFlix Logo" width="80" height="80" style="border-radius: 18px;" />
   <br />
-  SnapFlix Web
+  SnapFlix
 </h1>
 
 <p align="center">
@@ -30,7 +30,7 @@
 
 ## 🌟 Overview
 
-**SnapFlix Web** is a private, high-contrast cinema streaming platform built with **Next.js 16 (App Router / Turbopack)** and deployed on **Cloudflare Workers (OpenNext)**.
+**SnapFlix** is a private, high-contrast cinema streaming platform built with **Next.js 16 (App Router / Turbopack)** and deployed on **Cloudflare Workers (OpenNext)**.
 
 All third-party client providers and fragmented scraper fallbacks have been retired. Stream discovery, language prioritization, and multi-engine orchestration run exclusively through our own **SnapFlix Master Gateway** (`https://api.snapflix.indevs.in`), while TMDB metadata is protected behind a dedicated server-side proxy so private tokens never reach the browser.
 
@@ -61,7 +61,7 @@ All third-party client providers and fragmented scraper fallbacks have been reti
 
 ```mermaid
 flowchart TD
-    Browser["SnapFlix Web Client (Next.js 16 / React 19)"]
+    Browser["SnapFlix Client (Next.js 16 / React 19)"]
     Worker["Cloudflare Worker (OpenNext App + API Routes)"]
     TMDBProxy["Server TMDB Proxy (/api/tmdb/* + Server Actions)"]
     Gateway["SnapFlix Master Gateway (api.snapflix.indevs.in)"]
@@ -145,5 +145,5 @@ npm run deploy
 
 ## 📄 License & Credits
 
-SnapFlix Web is developed and maintained by **[Farhan Ansari](https://github.com/ansarixfarhan)**.
+SnapFlix is developed and maintained by **[Farhan Ansari](https://github.com/ansarixfarhan)**.
 All rights reserved. Proprietary software built for private entertainment and playback.
