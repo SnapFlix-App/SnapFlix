@@ -5,7 +5,7 @@
 </h1>
 
 <p align="center">
-  <strong>Next-Gen Cinema Web Platform powered by Custom Dual-Tier Streaming API (Vidly Edge + Vidy Dedicated Node).</strong>
+  <strong>Next-Gen Cinema Web Platform powered by SnapFlix Master Gateway & Audio-First Adaptive Streaming.</strong>
 </p>
 
 <p align="center">
@@ -30,68 +30,54 @@
 
 ## 🌟 Overview
 
-**SnapFlix Web** is a private, cinematic media streaming application designed with a high-contrast Netflix aesthetic. Built on **Next.js 16 (App Router / Turbopack)** and deployed on **Cloudflare Workers (OpenNext)**, SnapFlix provides a seamless catalog discovery and ultra-fast video playback experience.
+**SnapFlix Web** is a private, high-contrast cinema streaming platform built with **Next.js 16 (App Router / Turbopack)** and deployed on **Cloudflare Workers (OpenNext)**.
 
-Previously reliant on third-party client scrapers, SnapFlix now runs exclusively on its own **Custom Hybrid Streaming Backend API**:
-1. **Tier-1 (`Vidly Edge Gateway`)**: Serverless edge resolver hosted on Cloudflare Workers delivering master multi-audio HLS streams and global media proxying.
-2. **Tier-2 (`Vidy VPS Node`)**: Dedicated Oracle Cloud VPS running custom stream resolvers with Miami, Delhi, and Boise nodes, powering multi-audio fallbacks and 4K/1080p playback.
+All third-party client providers and fragmented scraper fallbacks have been retired. Stream discovery, language prioritization, and multi-engine orchestration run exclusively through our own **SnapFlix Master Gateway** (`https://api.snapflix.indevs.in`), while TMDB metadata is protected behind a dedicated server-side proxy so private tokens never reach the browser.
 
 ---
 
 ## ✨ Key Features
 
-### 🎬 Cinema Experience & Discovery
-- **Netflix Design System**: Dynamic Hero Billboard, top-rated trending rows, and "Top 10" badges.
-- **Instant Search**: Real-time server-side TMDB discovery across movies, series, actors, and genres.
-- **Server-Side Metadata Protection**: TMDB API keys and authentication tokens are kept strictly server-side.
-- **Personal Watchlist & History**: Cloud-synchronized watch history and continue-watching state via Supabase.
+### 🎬 Cinema Discovery & Protected Metadata
+- **Netflix-Inspired UI**: Hero billboard, trending rows, top-10 highlights, collections, and instant search across movies, TV series, people, and genres.
+- **Zero-Leak Server TMDB Proxy**: Every client-side TMDB request routes transparently through `/api/tmdb/[...path]` and Next.js Server Actions, attaching server-only `TMDB_ACCESS_TOKEN` credentials with automatic mirror fallback (`db.wecollege.net`) and zero `401` errors or bundled secrets.
+- **Personal Watchlist & Resume Sync**: Cloud-synced watchlist, bookmarks, and playback progress powered by Supabase.
 
-### ⚡ Custom Streaming Engine (`SnapFlix API`)
-- **Direct Dual-Tier Streaming**:
-  - **Primary**: `https://vidly.snapflix.indevs.in` (Vidly Edge Gateway).
-  - **Secondary / Fallback**: `https://vidy.snapflix.indevs.in` (Vidy VPS Node).
-- **Smart Failover**: Automatic seamless recovery to secondary nodes if an upstream stream stalls or encounters errors.
-- **Zero CORS / ISP Bypass**: Universal edge stream proxying for video chunks, keys, and master playlists.
+### ⚡ SnapFlix Master Gateway (`api.snapflix.indevs.in`)
+- **Single-Endpoint Gateway Architecture**: The web app connects exclusively to `NEXT_PUBLIC_GATEWAY_URL` (`/api/v1/resolve` and `/api/provider/resolve`), removing all legacy fallback domains from frontend code.
+- **Multi-Engine Orchestration & Caching**: The Master Gateway queries backend engines concurrently in a single request, caches resolved results, and returns normalized stream arrays plus per-engine metadata (`hasHindi`, `primaryAudio`, `engines`, `streams`).
+- **Automatic Background Failover**: If an active stream stalls or returns a network error, the player automatically switches to the next healthy engine stream matching the user's active audio language with no manual server hunting.
 
-### 🎥 Native Pro Web Player (`NativeWebPlayer`)
-- **Dual Server Switcher**: Toggle between `SnapFlix Fast (Vidly)` and `SnapFlix Vidy (VPS)` on the fly with automatic timestamp and audio state preservation.
-- **Adaptive Multi-Bitrate**: HLS resolution selector (`Auto`, `4K`, `1080p`, `720p`, `480p`, `360p`).
-- **Multi-Audio Language Selection**: Real-time audio switching with **Hindi audio prioritized as default** when available.
-- **Universal Subtitles System**:
-  - Automatically fetches matching subtitles from OpenSubtitles in the background for any title.
-  - Cross-server subtitle sharing so subtitles stay active when switching between Vidly and Vidy.
-  - **Dynamic Letterbox Anchoring**: Subtitles sit comfortably 1-2px below the movie frame into the black bar with zero visual overlap.
-  - **Flag & Language Identification**: Accurate language detection with country flags (🇮🇳 Hindi, 🇬🇧 English, 🇪🇸 Spanish, 🇭🇷 Croatian, etc.).
-  - Custom subtitle appearance controls (Font size, Text color, Background style).
-- **Watch Party (Supabase Realtime)**:
-  - Synchronized group playback (Play, Pause, Seek).
-  - Live chat drawer with animated floating reactions.
-- **Keyboard & Gesture Controls**: Complete hotkey bindings (Space/K for play, J/L for 10s seek, F for fullscreen, M for mute) and touch-friendly mobile bottom drawers.
+### 🎥 Audio-First Web Player (`NativeWebPlayer`)
+- **Hindi-First Audio Anchor**: Prioritizes Hindi audio by default when available and accurately detects original/other tracks (English, Korean, Japanese, Tamil, Telugu, etc.) without mislabeling non-Hindi HLS streams.
+- **Unique Deduplicated Quality Selector**: Aggregates unique resolutions (`Auto`, `4K`, `1440p`, `1080p`, `720p`, `480p` / `360p`) across all Gateway engines strictly filtered for the active audio language, keeping audio locked when switching quality.
+- **Clean Player Controls**: Desktop Quality popover and mobile bottom sheets (`Quality | Audio | Subs`) with internal/external HLS audio & resolution switching and no server-selection clutter.
+- **Universal Subtitles System**: Background OpenSubtitles lookup, internal HLS tracks, custom `.srt`/`.vtt` uploads, language flags, and styling customization.
+- **Watch Party (Supabase Realtime)**: Synchronized group playback and live chat reactions.
 
 ---
 
 ## 🛠️ Architecture
 
 ```mermaid
-graph TD
-    Client["SnapFlix Web (Next.js 16 / Cloudflare)"]
-    
-    subgraph Custom Backend API
-        VidlyEdge["Vidly Edge Gateway (Cloudflare Worker)<br/>vidly.snapflix.indevs.in"]
-        VidyVPS["Vidy Dedicated Node (Oracle VPS)<br/>vidy.snapflix.indevs.in"]
-    end
-    
-    subgraph Data & Sync
-        TMDB["TMDB API (Server Actions)"]
-        Supabase["Supabase (Auth + Realtime Party)"]
-        OpenSubs["OpenSubtitles REST API"]
-    end
+flowchart TD
+    Browser["SnapFlix Web Client (Next.js 16 / React 19)"]
+    Worker["Cloudflare Worker (OpenNext App + API Routes)"]
+    TMDBProxy["Server TMDB Proxy (/api/tmdb/* + Server Actions)"]
+    Gateway["SnapFlix Master Gateway (api.snapflix.indevs.in)"]
+    Engines["Gateway Backend Engines & Edge Proxies"]
+    TMDB["TMDB API + Mirror Fallback"]
+    Supabase["Supabase (Auth, Watchlist, Realtime)"]
+    OpenSubs["OpenSubtitles API"]
 
-    Client -->|1. Metadata & Search| TMDB
-    Client -->|2. Stream Resolve Tier 1| VidlyEdge
-    Client -->|3. Stream Resolve Tier 2 / Failover| VidyVPS
-    Client -->|4. User Data & Watch Party| Supabase
-    Client -->|5. Multi-Language Subtitles| OpenSubs
+    Browser --> Worker
+    Browser -->|Metadata Requests| TMDBProxy
+    Browser -->|Unified Stream Resolve| Gateway
+    Worker --> TMDBProxy
+    TMDBProxy -->|Server Secret Auth| TMDB
+    Gateway --> Engines
+    Browser -->|User Sync & Watch Party| Supabase
+    Worker -->|Subtitle Search & Download| OpenSubs
 ```
 
 ---
@@ -102,11 +88,12 @@ graph TD
 | :--- | :--- |
 | **Framework** | [Next.js 16.4.3 (App Router)](https://nextjs.org/) & React 19 |
 | **Language** | [TypeScript 5.x](https://www.typescriptlang.org/) |
-| **Styling** | [Tailwind CSS 4](https://tailwindcss.com/) & Lucide React Icons |
-| **Player & Video** | [Hls.js](https://github.com/video-dev/hls.js/) + Native HTML5 Media Tracks |
-| **Backend Deployment** | [Cloudflare Workers](https://workers.cloudflare.com/) via OpenNext (`@opennextjs/cloudflare`) |
-| **Database & Realtime**| [Supabase](https://supabase.com/) (PostgreSQL, Auth, Realtime Channels) |
-| **Metadata & Media** | [The Movie Database (TMDB)](https://www.themoviedb.org/) & OpenSubtitles |
+| **Styling** | [Tailwind CSS 4](https://tailwindcss.com/) & HeroUI / React Icons |
+| **Player & Video** | [Hls.js](https://github.com/video-dev/hls.js/) + Native HTML5 Video |
+| **Edge Hosting** | [Cloudflare Workers](https://workers.cloudflare.com/) via `@opennextjs/cloudflare` |
+| **Streaming API** | SnapFlix Master Gateway (`https://api.snapflix.indevs.in`) |
+| **Database & Realtime** | [Supabase](https://supabase.com/) (PostgreSQL, Auth, Realtime Channels) |
+| **Metadata & Subtitles** | [The Movie Database (TMDB)](https://www.themoviedb.org/) & OpenSubtitles |
 
 ---
 
@@ -114,76 +101,49 @@ graph TD
 
 ### 1. Clone & Install
 ```bash
-git clone https://github.com/ansarixfarhan/SnapFlix.git
+git clone https://github.com/SnapFlix-App/SnapFlix.git
 cd SnapFlix/SnapFlix-Web
 npm install
 ```
 
 ### 2. Environment Variables
-Create `.env.local` based on `.env.example`:
+Create `.env.local` for local development (never commit `.env.local` or `.env.production` secrets):
 
 ```env
-# TMDB API (Server-Side)
+# TMDB API (Server-Only — never bundled into client JS)
 TMDB_ACCESS_TOKEN="your_tmdb_read_access_token"
-NEXT_PUBLIC_TMDB_ACCESS_TOKEN="your_tmdb_read_access_token"
 
-# Custom Streaming APIs
-NEXT_PUBLIC_BACKEND_URL="https://vidly.snapflix.indevs.in"
-NEXT_PUBLIC_BACKEND_URL_TIER2="https://vidy.snapflix.indevs.in"
+# SnapFlix Master Gateway
+NEXT_PUBLIC_GATEWAY_URL="https://api.snapflix.indevs.in"
 
 # Supabase Auth & Realtime
 NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
-NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="your-publishable-key"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 ```
 
-> The separate mobile metadata API requires the server-only
-> `TMDB_ACCESS_TOKEN` and does not use public/fallback TMDB credentials. See
-> [Mobile API documentation](docs/mobile-api.md).
+In production, `TMDB_ACCESS_TOKEN` must be configured as a **Cloudflare Worker Secret** (never as a `NEXT_PUBLIC_*` variable in `wrangler.jsonc`).
 
-### 3. Local Development
+### 3. Local Development & Verification
 ```bash
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) to view the application.
 
-### 4. Production Deployment (Cloudflare Workers)
-SnapFlix Web builds and deploys directly to Cloudflare via OpenNext and Wrangler:
+Run type checks before deploying:
 ```bash
-npm run deploy
+npm run typecheck
 ```
 
-### 5. Mobile Metadata API
-
-The mobile app has its own versioned TMDB metadata API under
-`/api/mobile/v1/`: home, list, search, details, episodes, episode groups,
-genre Discover, genre lists, IMDb-to-TMDB lookup, title logos and movie
-collection details. Details include Story-ready reviews, certification and
-collection summaries; Discover supports anime/Korean presets and explicit
-language, country and keyword filters. It uses only the server-side
-`TMDB_ACCESS_TOKEN`, fixed TMDB paths, strict input validation, layered caching
-and request-rate protection. Home returns partial results if a single row fails,
-and the optional app-key gate disables public CDN caching so it cannot be
-bypassed by a cache hit. The existing provider/stream resolver and website
-playback are unchanged.
-
-Endpoint contracts, Cloudflare secret/cache/WAF setup and targeted test
-commands are documented in [docs/mobile-api.md](docs/mobile-api.md).
-
+### 4. Production Deployment (Cloudflare Workers)
 ```bash
-npm run test:mobile-api
-npm run typecheck:mobile
-npm run typecheck
+npm run build
+npm run deploy
 ```
 
 ---
 
 ## 📄 License & Credits
 
-SnapFlix Web is developed and maintained by **[Farhan Ansari](https://github.com/ansarixfarhan)**.  
+SnapFlix Web is developed and maintained by **[Farhan Ansari](https://github.com/ansarixfarhan)**.
 All rights reserved. Proprietary software built for private entertainment and playback.
-
----
-
-<p align="center">
-  Crafted with ❤️ by <a href="https://github.com/ansarixfarhan"><strong>Farhan Ansari</strong></a>
-</p>
