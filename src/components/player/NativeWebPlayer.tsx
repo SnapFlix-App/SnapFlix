@@ -587,12 +587,12 @@ export default function NativeWebPlayer({
   const [selectedStream, setSelectedStream] = useState<StreamItem | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Active Server Provider ('vidly' | 'vidbolt' | 'vidrift' | 'vidy') & Server Switcher States
-  const [activeServerProvider, setActiveServerProvider] = useState<'vidly' | 'vidbolt' | 'vidrift' | 'vidy'>('vidly');
+  // Active Server Provider ('vidly' | 'vidbolt' | 'vidrift' | 'extra') & Server Switcher States
+  const [activeServerProvider, setActiveServerProvider] = useState<'vidly' | 'vidbolt' | 'vidrift' | 'extra'>('vidly');
   const [vidlyResults, setVidlyResults] = useState<ProviderResult[]>([]);
   const [vidboltResults, setVidboltResults] = useState<ProviderResult[]>([]);
   const [vidriftResults, setVidriftResults] = useState<ProviderResult[]>([]);
-  const [vidyResults, setVidyResults] = useState<ProviderResult[]>([]);
+  const [extraResults, setExtraResults] = useState<ProviderResult[]>([]);
   const [showServerQualityMenu, setShowServerQualityMenu] = useState<boolean>(false);
   const serverQualityMenuRef = useRef<HTMLDivElement>(null);
   const mobileServerRef = useRef<HTMLDivElement>(null);
@@ -1046,7 +1046,7 @@ export default function NativeWebPlayer({
   // Audio & Multi-Track States
   const resumeTimeRef = useRef<number | null>(null);
   const failedStreamLinksRef = useRef<Set<string>>(new Set());
-  const standbyFallbackRef = useRef<{ provider: 'Vidy'; results: any[] } | null>(null);
+  const standbyFallbackRef = useRef<{ provider: string; results: any[] } | null>(null);
   const userSelectedLangRef = useRef<string | null>(null);
   const [activeLanguage, setActiveLanguage] = useState<string>('Hindi');
   const [hlsAudioTracks, setHlsAudioTracks] = useState<any[]>([]);
@@ -1230,7 +1230,7 @@ export default function NativeWebPlayer({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-fetch OpenSubtitles in background for media so all servers (including Vidy) have rich subtitles
+  // Auto-fetch OpenSubtitles in background for media so all servers have rich subtitles
   useEffect(() => {
     if (!title) return;
     let isCancelled = false;
@@ -1435,7 +1435,7 @@ export default function NativeWebPlayer({
       ...vidlyResults,
       ...vidboltResults,
       ...vidriftResults,
-      ...vidyResults,
+      ...extraResults,
     ];
 
     allProvidersList.forEach((prov) => {
@@ -1485,7 +1485,7 @@ export default function NativeWebPlayer({
         if (b.name === 'English') return 1;
         return b.count - a.count;
       });
-  }, [providerResults, vidlyResults, vidboltResults, vidriftResults, vidyResults, originalLanguage, hlsAudioTracks]);
+  }, [providerResults, vidlyResults, vidboltResults, vidriftResults, extraResults, originalLanguage, hlsAudioTracks]);
 
   // Keep activeLanguage in sync with current stream
   useEffect(() => {
@@ -1502,7 +1502,7 @@ export default function NativeWebPlayer({
       vidlyResults.find((p) => p.providerName === selectedStream.providerName) ||
       vidboltResults.find((p) => p.providerName === selectedStream.providerName) ||
       vidriftResults.find((p) => p.providerName === selectedStream.providerName) ||
-      vidyResults.find((p) => p.providerName === selectedStream.providerName);
+      extraResults.find((p) => p.providerName === selectedStream.providerName);
 
     const streamLangs = getStreamAudioLanguages(selectedStream, currentProv?.infoTitle, originalLanguage);
 
@@ -1538,7 +1538,7 @@ export default function NativeWebPlayer({
         setActiveLanguage(streamLangs[0]);
       }
     }
-  }, [selectedStream, providerResults, vidlyResults, vidboltResults, vidriftResults, vidyResults, originalLanguage, hlsAudioTracks, currentHlsAudioTrack]);
+  }, [selectedStream, providerResults, vidlyResults, vidboltResults, vidriftResults, extraResults, originalLanguage, hlsAudioTracks, currentHlsAudioTrack]);
 
   // Instant Audio Switcher Handler: switches audio immediately without redirecting to servers list
   const handleSelectLanguage = (targetLang: string) => {
@@ -1576,14 +1576,14 @@ export default function NativeWebPlayer({
 
     // 2. Cross-server switch: find best playable stream supporting targetLang across providers
     let candidateStream: StreamItem | null = null;
-    let targetProvKey: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy' = activeServerProvider;
+    let targetProvKey: 'vidly' | 'vidbolt' | 'vidrift' | 'extra' = activeServerProvider;
     let targetProvList: ProviderResult[] = providerResults;
 
-    const allProvidersWithKeys: Array<{ key: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy'; results: ProviderResult[] }> = [
+    const allProvidersWithKeys: Array<{ key: 'vidly' | 'vidbolt' | 'vidrift' | 'extra'; results: ProviderResult[] }> = [
       { key: 'vidly', results: vidlyResults },
       { key: 'vidbolt', results: vidboltResults },
       { key: 'vidrift', results: vidriftResults },
-      { key: 'vidy', results: vidyResults },
+      { key: 'extra', results: extraResults },
     ];
 
     // A. Check current active provider first
@@ -1649,11 +1649,11 @@ export default function NativeWebPlayer({
   interface UniqueServerOption {
     id: string;
     name: string;
-    provider: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy';
+    provider: 'vidly' | 'vidbolt' | 'vidrift' | 'extra';
     streams: StreamItem[];
   }
 
-  // Deduplicated servers list (Server 1: SnapFlix Fast, Server 2: VidBolt, Server 3: VidRift, Server 4: Vidy Standby)
+  // Deduplicated servers list (Server 1: SnapFlix Fast, Server 2: VidBolt, Server 3: VidRift, plus any extra Gateway engines)
   const availableServers = useMemo<UniqueServerOption[]>(() => {
     const list: UniqueServerOption[] = [];
 
@@ -1711,29 +1711,29 @@ export default function NativeWebPlayer({
       });
     }
 
-    // Server 4: Vidy Standby
-    const vidyStreams: StreamItem[] = [];
-    vidyResults.forEach((prov) => {
+    // Extra Gateway engines (if any future engine is added)
+    const extraStreams: StreamItem[] = [];
+    extraResults.forEach((prov) => {
       prov.streams?.forEach((s) => {
         if (isPlayableStream(s)) {
-          vidyStreams.push({ ...s, providerName: prov.providerName });
+          extraStreams.push({ ...s, providerName: prov.providerName });
         }
       });
     });
-    if (vidyStreams.length > 0) {
+    if (extraStreams.length > 0) {
       list.push({
-        id: 'server-4-vidy',
-        name: 'Server 4: Vidy Standby',
-        provider: 'vidy',
-        streams: vidyStreams,
+        id: 'server-4-extra',
+        name: 'Server 4: Backup Cloud',
+        provider: 'extra',
+        streams: extraStreams,
       });
     }
 
     return list;
-  }, [vidlyResults, vidboltResults, vidriftResults, vidyResults]);
+  }, [vidlyResults, vidboltResults, vidriftResults, extraResults]);
 
-  // Handle Manual Server Switching between Vidly, VidBolt, VidRift, and Vidy
-  const handleSelectServer = (targetProvider: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy', stream: StreamItem) => {
+  // Handle Manual Server Switching between Vidly, VidBolt, VidRift, and backup Gateway engines
+  const handleSelectServer = (targetProvider: 'vidly' | 'vidbolt' | 'vidrift' | 'extra', stream: StreamItem) => {
     if (stream.link === selectedStream?.link) {
       setShowServerQualityMenu(false);
       setShowMobileDrawer(false);
@@ -1750,7 +1750,7 @@ export default function NativeWebPlayer({
           ? vidboltResults
           : targetProvider === 'vidrift'
             ? vidriftResults
-            : vidyResults;
+            : extraResults;
     if (results && results.length > 0) {
       setProviderResults(results);
     }
@@ -1790,7 +1790,7 @@ export default function NativeWebPlayer({
 
     // Refresh Audio Language for new server:
     // If the new server stream doesn't match activeLanguage, align with the new stream's language
-    const currentProvForStream = results?.find(p => p.providerName === (stream.providerName || (targetProvider === 'vidly' ? 'Vidly Edge' : targetProvider === 'vidbolt' ? 'SnapFlix VidBolt' : targetProvider === 'vidrift' ? 'VidRift Fast HLS' : 'Vidy VPS')));
+    const currentProvForStream = results?.find(p => p.providerName === (stream.providerName || (targetProvider === 'vidly' ? 'Vidly Edge' : targetProvider === 'vidbolt' ? 'SnapFlix VidBolt' : targetProvider === 'vidrift' ? 'VidRift Fast HLS' : 'Backup Cloud')));
     const streamLangs = getStreamAudioLanguages(stream, currentProvForStream?.infoTitle, originalLanguage);
     if (streamLangs.length > 0 && !streamLangs.includes(activeLanguage)) {
       if (streamLangs.includes('Hindi')) {
@@ -1802,7 +1802,7 @@ export default function NativeWebPlayer({
 
     setSelectedStream({
       ...stream,
-      providerName: stream.providerName || (targetProvider === 'vidly' ? 'Vidly Edge' : targetProvider === 'vidbolt' ? 'SnapFlix VidBolt' : targetProvider === 'vidrift' ? 'VidRift Fast HLS' : 'Vidy VPS'),
+      providerName: stream.providerName || (targetProvider === 'vidly' ? 'Vidly Edge' : targetProvider === 'vidbolt' ? 'SnapFlix VidBolt' : targetProvider === 'vidrift' ? 'VidRift Fast HLS' : 'Backup Cloud'),
     });
 
     setShowServerQualityMenu(false);
@@ -1855,7 +1855,7 @@ export default function NativeWebPlayer({
     }
 
     // 2. Check all playable streams matching activeLanguage across all Gateway engines
-    const combinedProviders = [...providerResults, ...vidlyResults, ...vidboltResults, ...vidriftResults, ...vidyResults];
+    const combinedProviders = [...providerResults, ...vidlyResults, ...vidboltResults, ...vidriftResults, ...extraResults];
     const hasLangMatchedStreams = combinedProviders.some((prov) =>
       prov.streams.some((s) => isPlayableStream(s) && getStreamAudioLanguages(s, prov.infoTitle, originalLanguage).includes(activeLanguage))
     );
@@ -1920,7 +1920,7 @@ export default function NativeWebPlayer({
     }
 
     return options;
-  }, [hlsLevels, providerResults, vidlyResults, vidboltResults, vidriftResults, vidyResults, activeLanguage, originalLanguage]);
+  }, [hlsLevels, providerResults, vidlyResults, vidboltResults, vidriftResults, extraResults, activeLanguage, originalLanguage]);
 
   // Handle Quality Selection (Strictly preserves currently active audio language)
   const handleSelectQuality = (targetQuality: string) => {
@@ -1961,17 +1961,17 @@ export default function NativeWebPlayer({
       return srv.includes(`${targetHeight}p`) || srv.includes(String(targetHeight));
     };
 
-    const orderedProviders: Array<{ key: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy'; results: ProviderResult[] }> = [
+    const orderedProviders: Array<{ key: 'vidly' | 'vidbolt' | 'vidrift' | 'extra'; results: ProviderResult[] }> = [
       { key: activeServerProvider, results: providerResults },
       { key: 'vidrift', results: vidriftResults },
       { key: 'vidly', results: vidlyResults },
       { key: 'vidbolt', results: vidboltResults },
-      { key: 'vidy', results: vidyResults },
+      { key: 'extra', results: extraResults },
     ];
 
     // 2. Cross-engine switch: strictly match ACTIVE AUDIO LANGUAGE + target quality
     let candidate: StreamItem | null = null;
-    let targetGroup: { key: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy'; results: ProviderResult[] } | null = null;
+    let targetGroup: { key: 'vidly' | 'vidbolt' | 'vidrift' | 'extra'; results: ProviderResult[] } | null = null;
 
     for (const group of orderedProviders) {
       for (const prov of group.results) {
@@ -2075,7 +2075,7 @@ export default function NativeWebPlayer({
       }
     });
 
-    // 4. Auto-fetched OpenSubtitles (available for all servers, including Vidy VPS!)
+    // 4. Auto-fetched OpenSubtitles (available for all servers!)
     autoSubtitles.forEach((sub) => {
       if (!seenTitles.has(sub.title.toLowerCase()) && !seenUris.has(sub.uri)) {
         seenUris.add(sub.uri);
@@ -2275,12 +2275,12 @@ export default function NativeWebPlayer({
 
     failedStreamLinksRef.current.add(selectedStream.link);
 
-    const orderedEngines: Array<{ key: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy'; results: ProviderResult[] }> = [
+    const orderedEngines: Array<{ key: 'vidly' | 'vidbolt' | 'vidrift' | 'extra'; results: ProviderResult[] }> = [
       { key: activeServerProvider, results: providerResults },
       { key: 'vidrift', results: vidriftResults },
       { key: 'vidly', results: vidlyResults },
       { key: 'vidbolt', results: vidboltResults },
-      { key: 'vidy', results: vidyResults },
+      { key: 'extra', results: extraResults },
     ];
 
     // 1. First priority: alternative stream matching activeLanguage across all engines
@@ -2332,7 +2332,7 @@ export default function NativeWebPlayer({
     }
 
     return false;
-  }, [selectedStream, activeServerProvider, providerResults, vidriftResults, vidlyResults, vidboltResults, vidyResults, activeLanguage, originalLanguage, currentTime]);
+  }, [selectedStream, activeServerProvider, providerResults, vidriftResults, vidlyResults, vidboltResults, extraResults, activeLanguage, originalLanguage, currentTime]);
 
   // Compute first playable stream (for quick-switch when MKV or error occurs)
   const firstPlayableStream = useMemo(() => {
@@ -2374,7 +2374,7 @@ export default function NativeWebPlayer({
         setVidlyResults([]);
         setVidboltResults([]);
         setVidriftResults([]);
-        setVidyResults([]);
+        setExtraResults([]);
         setHlsAudioTracks([]);
         setCurrentHlsAudioTrack(-1);
         userSelectedLangRef.current = null;
@@ -2396,15 +2396,13 @@ export default function NativeWebPlayer({
         const vlyStreams = (engineList.find((e) => e.engine === 'vidly')?.streams || []).filter(isPlayableStream);
         const vbtStreams = (engineList.find((e) => e.engine === 'vidbolt')?.streams || []).filter(isPlayableStream);
         const vrfStreams = (engineList.find((e) => e.engine === 'vidrift')?.streams || []).filter(isPlayableStream);
-        const vdyStreams = (engineList.find((e) => e.engine === 'vidy')?.streams || []).filter(isPlayableStream);
 
         const vlyRes: ProviderResult[] = vlyStreams.length > 0 ? [{ providerValue: 'vidly', providerName: 'SnapFlix Fast', streams: vlyStreams }] : [];
         const vbtRes: ProviderResult[] = vbtStreams.length > 0 ? [{ providerValue: 'vidbolt', providerName: 'VidBolt Turbo', streams: vbtStreams }] : [];
         const vrfRes: ProviderResult[] = vrfStreams.length > 0 ? [{ providerValue: 'vidrift', providerName: 'VidRift HD', streams: vrfStreams }] : [];
-        const vdyRes: ProviderResult[] = vdyStreams.length > 0 ? [{ providerValue: 'vidy', providerName: 'Vidy Cloud', streams: vdyStreams }] : [];
 
         // Capture any additional engines returned by Gateway so nothing is ever dropped
-        const knownEngineIds = new Set(['vidly', 'vidbolt', 'vidrift', 'vidy']);
+        const knownEngineIds = new Set(['vidly', 'vidbolt', 'vidrift']);
         const extraRes: ProviderResult[] = engineList
           .filter((e) => e?.engine && !knownEngineIds.has(e.engine))
           .map((e) => ({
@@ -2417,7 +2415,7 @@ export default function NativeWebPlayer({
         setVidlyResults(vlyRes);
         setVidboltResults(vbtRes);
         setVidriftResults(vrfRes);
-        setVidyResults([...vdyRes, ...extraRes]);
+        setExtraResults(extraRes);
 
         const isHindiStream = (s: StreamItem) => {
           const l = (s.language || '').toLowerCase();
@@ -2438,7 +2436,7 @@ export default function NativeWebPlayer({
         const targetStream = hindiStream || playableStreams[0] || null;
 
         let chosenResults: ProviderResult[] = [];
-        let chosenProvider: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy' = 'vidly';
+        let chosenProvider: 'vidly' | 'vidbolt' | 'vidrift' | 'extra' = 'vidly';
         let chosen: StreamItem | null = null;
 
         if (targetStream) {
@@ -2454,16 +2452,11 @@ export default function NativeWebPlayer({
             chosenProvider = 'vidbolt';
             chosenResults = vbtRes;
             chosen = { ...targetStream, providerName: 'VidBolt Turbo' };
-          } else if (vdyStreams.some((s: StreamItem) => s.link === targetStream.link)) {
-            chosenProvider = 'vidy';
-            chosenResults = vdyRes;
-            chosen = { ...targetStream, providerName: 'Vidy Cloud' };
           } else {
             if (vrfRes.length > 0) { chosenProvider = 'vidrift'; chosenResults = vrfRes; }
             else if (vlyRes.length > 0) { chosenProvider = 'vidly'; chosenResults = vlyRes; }
             else if (vbtRes.length > 0) { chosenProvider = 'vidbolt'; chosenResults = vbtRes; }
-            else if (vdyRes.length > 0) { chosenProvider = 'vidy'; chosenResults = vdyRes; }
-            else { chosenProvider = 'vidy'; chosenResults = extraRes; }
+            else { chosenProvider = 'extra'; chosenResults = extraRes; }
             chosen = targetStream;
           }
 

@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
     if (!res.ok) {
       const vpsProxy = url.includes('vidrift.net')
         ? `https://vidrift.snapflix.indevs.in/api/proxy/stream?v=2&url=${encodeURIComponent(url)}`
-        : `https://vidy.snapflix.indevs.in/api/proxy/stream?v=2&url=${encodeURIComponent(url)}`;
+        : `https://vidly.snapflix.indevs.in/api/proxy/stream?v=2&url=${encodeURIComponent(url)}`;
       try {
         const vpsRes = await fetch(vpsProxy, {
           headers: {
