@@ -110,7 +110,7 @@ const Footer: React.FC<FooterProps> = ({ className }) => {
         {/* Bottom Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs pt-2">
           <p className="text-zinc-500 text-center sm:text-left">
-            © 2026 SnapFlix Cinema. All rights reserved.
+            © 2026 SnapFlix. All rights reserved.
           </p>
 
           <div className="flex items-center gap-1.5 text-zinc-400 text-center sm:text-right flex-wrap justify-center">
