@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const MASTER_GATEWAY = (process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://api.snapflix.indevs.in').replace(/\/$/, '');
-const PRIMARY_BACKEND = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://vidly.snapflix.indevs.in').replace(/\/$/, '');
-const VIDBOLT_BACKEND = (process.env.NEXT_PUBLIC_VIDBOLT_URL || 'https://vidbolt.snapflix.indevs.in').replace(/\/$/, '');
-const VIDRIFT_BACKEND = (process.env.NEXT_PUBLIC_VIDRIFT_URL || 'https://vidrift.snapflix.indevs.in').replace(/\/$/, '');
-const SECONDARY_BACKEND = (process.env.NEXT_PUBLIC_BACKEND_URL_TIER2 || 'https://vidy.snapflix.indevs.in').replace(/\/$/, '');
+
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': '*',
+};
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -16,120 +18,33 @@ export async function GET(request: NextRequest) {
       'X-SnapFlix-Client': 'snapflix-web',
     };
 
-    // 1. Prioritize Master Gateway (Unified 4-engine orchestrator with Hindi-first priority & cache)
-    try {
-      const gwRes = await fetch(`${MASTER_GATEWAY}/api/v1/resolve?${searchParams.toString()}`, {
-        headers: authHeaders,
-        next: { revalidate: 3600 },
-      });
-      if (gwRes.ok) {
-        const gwData = await gwRes.json();
-        if (gwData?.success && (gwData?.streams?.length > 0 || gwData?.results?.length > 0)) {
-          return NextResponse.json(gwData, {
-            status: 200,
-            headers: {
-              'Access-Control-Allow-Origin': '*',
-              'Access-Control-Allow-Methods': 'GET, OPTIONS',
-              'Access-Control-Allow-Headers': '*',
-            },
-          });
-        }
+    const gwRes = await fetch(`${MASTER_GATEWAY}/api/v1/resolve?${searchParams.toString()}`, {
+      headers: authHeaders,
+      next: { revalidate: 3600 },
+    });
+
+    if (gwRes.ok) {
+      const gwData = await gwRes.json();
+      if (gwData?.success && (gwData?.streams?.length > 0 || gwData?.results?.length > 0 || gwData?.engines?.length > 0)) {
+        return NextResponse.json(gwData, { status: 200, headers: CORS_HEADERS });
       }
-    } catch (gwErr) {
-      console.warn('[SnapFlix-Web API/Resolve] Master Gateway bypassed, falling back to direct scrapers:', gwErr);
-    }
-
-    // 2. Direct scraper fallback
-    const [primarySettled, vidboltSettled, vidriftSettled, secondarySettled] = await Promise.allSettled([
-      fetch(`${PRIMARY_BACKEND}/api/provider/resolve?${searchParams.toString()}`, {
-        headers: authHeaders,
-      }).then(async (r) => (r.ok ? r.json() : null)),
-      fetch(`${VIDBOLT_BACKEND}/api/provider/resolve?${searchParams.toString()}`, {
-        headers: authHeaders,
-      }).then(async (r) => (r.ok ? r.json() : null)),
-      fetch(`${VIDRIFT_BACKEND}/api/provider/resolve?${searchParams.toString()}`, {
-        headers: authHeaders,
-      }).then(async (r) => (r.ok ? r.json() : null)),
-      fetch(`${SECONDARY_BACKEND}/api/provider/resolve?${searchParams.toString()}`, {
-        headers: authHeaders,
-      }).then(async (r) => (r.ok ? r.json() : null)),
-    ]);
-
-    const primaryData = primarySettled.status === 'fulfilled' ? primarySettled.value : null;
-    const vidboltData = vidboltSettled.status === 'fulfilled' ? vidboltSettled.value : null;
-    const vidriftData = vidriftSettled.status === 'fulfilled' ? vidriftSettled.value : null;
-    const secondaryData = secondarySettled.status === 'fulfilled' ? secondarySettled.value : null;
-
-    const combinedResults = [
-      ...(primaryData?.results || []),
-      ...(vidboltData?.results || []),
-      ...(vidriftData?.results || []),
-      ...(secondaryData?.results || []),
-    ];
-    const combinedStreams = [
-      ...(primaryData?.streams || []),
-      ...(vidboltData?.streams || []),
-      ...(vidriftData?.streams || []),
-      ...(secondaryData?.streams || []),
-    ];
-
-    if (combinedResults.length > 0) {
-      return NextResponse.json(
-        {
-          success: true,
-          query: primaryData?.query || vidboltData?.query || vidriftData?.query || secondaryData?.query || {},
-          media: primaryData?.media || vidboltData?.media || vidriftData?.media || secondaryData?.media || {},
-          tier: 'hybrid-4tier',
-          providersResponded: [
-            ...(primaryData?.providersResponded || []),
-            ...(vidboltData?.providersResponded || []),
-            ...(vidriftData?.providersResponded || []),
-            ...(secondaryData?.providersResponded || []),
-          ],
-          totalStreams: combinedStreams.length,
-          streams: combinedStreams,
-          results: combinedResults,
-        },
-        {
-          status: 200,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, OPTIONS',
-            'Access-Control-Allow-Headers': '*',
-          },
-        }
-      );
     }
 
     return NextResponse.json(
       {
         success: false,
-        message: 'No streams available from active providers.',
+        message: 'No streams available from SnapFlix Gateway.',
       },
-      {
-        status: 404,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': '*',
-        },
-      }
+      { status: 404, headers: CORS_HEADERS }
     );
   } catch (error: any) {
-    console.error('[SnapFlix-Web API/Resolve Hybrid Proxy Error]:', error);
+    console.error('[SnapFlix-Web API/Resolve Gateway Error]:', error);
     return NextResponse.json(
       {
         success: false,
-        message: error?.message || 'Failed to reach SnapFlix stream providers',
+        message: error?.message || 'Failed to reach SnapFlix Gateway',
       },
-      {
-        status: 502,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, OPTIONS',
-          'Access-Control-Allow-Headers': '*',
-        },
-      }
+      { status: 502, headers: CORS_HEADERS }
     );
   }
 }
@@ -137,10 +52,6 @@ export async function GET(request: NextRequest) {
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': '*',
-    },
+    headers: CORS_HEADERS,
   });
 }

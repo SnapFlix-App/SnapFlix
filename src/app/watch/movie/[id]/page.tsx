@@ -4,6 +4,7 @@ import { usePlayerEvents } from "@/hooks/usePlayerEvents";
 import { siteConfig } from "@/config/site";
 import { Params } from "@/types";
 import { tmdb } from "@/api/tmdb";
+import { getMovieDetails } from "@/actions/catalog";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Chip } from "@heroui/react";
 import { useDocumentTitle } from "@mantine/hooks";
@@ -34,10 +35,19 @@ const WatchMoviePage: NextPage<Params<{ id: string }>> = ({ params }) => {
   const { data: movieDetails } = useQuery({
     queryKey: ["movie-details", id],
     queryFn: async () => {
+      type MovieDetailsData = Awaited<ReturnType<typeof tmdb.movies.details<["recommendations", "similar"]>>>;
+      try {
+        const serverRes = await getMovieDetails(Number(id));
+        if (serverRes && "data" in serverRes && serverRes.data) {
+          return serverRes.data as MovieDetailsData;
+        }
+      } catch {
+        // Fallback to TMDB proxy client
+      }
       try {
         const res = await tmdb.movies.details(Number(id), ["recommendations", "similar"]);
         return res || null;
-      } catch (e) {
+      } catch {
         return null;
       }
     },

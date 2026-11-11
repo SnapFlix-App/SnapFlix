@@ -610,7 +610,7 @@ export default function NativeWebPlayer({
   const [showControls, setShowControls] = useState(true);
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [showMobileDrawer, setShowMobileDrawer] = useState(false);
-  const [mobileDrawerTab, setMobileDrawerTab] = useState<'audio' | 'subtitles' | 'quality' | 'servers'>('audio');
+  const [mobileDrawerTab, setMobileDrawerTab] = useState<'audio' | 'subtitles' | 'quality'>('audio');
   const [showEpisodesTray, setShowEpisodesTray] = useState(false);
   const [autoPlayNext, setAutoPlayNext] = useState(true);
   const [selectedEpisodeChunk, setSelectedEpisodeChunk] = useState(0);
@@ -1854,13 +1854,24 @@ export default function NativeWebPlayer({
       });
     }
 
-    // 2. Check all playable streams matching activeLanguage
-    providerResults.forEach((prov) => {
+    // 2. Check all playable streams matching activeLanguage across all Gateway engines
+    const combinedProviders = [...providerResults, ...vidlyResults, ...vidboltResults, ...vidriftResults, ...vidyResults];
+    const hasLangMatchedStreams = combinedProviders.some((prov) =>
+      prov.streams.some((s) => isPlayableStream(s) && getStreamAudioLanguages(s, prov.infoTitle, originalLanguage).includes(activeLanguage))
+    );
+
+    const seenStreamKeys = new Set<string>();
+    combinedProviders.forEach((prov) => {
       prov.streams.forEach((s) => {
         if (!isPlayableStream(s)) return;
+        const streamKey = `${prov.providerName}:${s.link}`;
+        if (seenStreamKeys.has(streamKey)) return;
+        seenStreamKeys.add(streamKey);
 
-        const langs = getStreamAudioLanguages(s, prov.infoTitle, originalLanguage);
-        if (!langs.includes(activeLanguage)) return;
+        if (hasLangMatchedStreams) {
+          const langs = getStreamAudioLanguages(s, prov.infoTitle, originalLanguage);
+          if (!langs.includes(activeLanguage)) return;
+        }
 
         const q = (s.quality || '').toLowerCase();
         const serverText = (s.server || '').toLowerCase();
@@ -1909,7 +1920,7 @@ export default function NativeWebPlayer({
     }
 
     return options;
-  }, [hlsLevels, providerResults, activeLanguage, originalLanguage]);
+  }, [hlsLevels, providerResults, vidlyResults, vidboltResults, vidriftResults, vidyResults, activeLanguage, originalLanguage]);
 
   // Handle Quality Selection (Strictly preserves currently active audio language)
   const handleSelectQuality = (targetQuality: string) => {
@@ -1940,51 +1951,67 @@ export default function NativeWebPlayer({
       }
     }
 
-    // 2. Cross-server switch: find best stream matching ACTIVE AUDIO LANGUAGE + target quality
+    const streamMatchesHeight = (s: StreamItem) => {
+      const q = (s.quality || '').toLowerCase();
+      const srv = (s.server || '').toLowerCase();
+      const qNum = parseInt(q, 10);
+      if (qNum === targetHeight) return true;
+      if (targetHeight === 2160 && (q.includes('4k') || q.includes('2160') || srv.includes('4k') || srv.includes('2160'))) return true;
+      if (targetHeight === 1440 && (q.includes('1440') || q.includes('2k') || srv.includes('1440') || srv.includes('2k'))) return true;
+      return srv.includes(`${targetHeight}p`) || srv.includes(String(targetHeight));
+    };
+
+    const orderedProviders: Array<{ key: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy'; results: ProviderResult[] }> = [
+      { key: activeServerProvider, results: providerResults },
+      { key: 'vidrift', results: vidriftResults },
+      { key: 'vidly', results: vidlyResults },
+      { key: 'vidbolt', results: vidboltResults },
+      { key: 'vidy', results: vidyResults },
+    ];
+
+    // 2. Cross-engine switch: strictly match ACTIVE AUDIO LANGUAGE + target quality
     let candidate: StreamItem | null = null;
-    for (const prov of providerResults) {
-      const match = prov.streams.find((s) => {
-        if (!isPlayableStream(s)) return false;
+    let targetGroup: { key: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy'; results: ProviderResult[] } | null = null;
 
-        // STRICT AUDIO LANGUAGE MATCH:
-        const langs = getStreamAudioLanguages(s, prov.infoTitle, originalLanguage);
-        if (!langs.includes(activeLanguage)) return false;
-
-        // Quality match:
-        const qNum = parseInt(s.quality || '', 10);
-        const serverHasQ =
-          s.server?.toLowerCase().includes(`${targetHeight}p`) ||
-          s.server?.toLowerCase().includes(String(targetHeight));
-        return qNum === targetHeight || serverHasQ;
-      });
-
-      if (match) {
-        candidate = { ...match, providerName: prov.providerName };
-        break;
-      }
-    }
-
-    // 3. Fallback: match by target quality only within active providerResults
-    if (!candidate) {
-      for (const prov of providerResults) {
+    for (const group of orderedProviders) {
+      for (const prov of group.results) {
         const match = prov.streams.find((s) => {
           if (!isPlayableStream(s)) return false;
-          const qNum = parseInt(s.quality || '', 10);
-          const serverHasQ =
-            s.server?.toLowerCase().includes(`${targetHeight}p`) ||
-            s.server?.toLowerCase().includes(String(targetHeight));
-          return qNum === targetHeight || serverHasQ;
+          const langs = getStreamAudioLanguages(s, prov.infoTitle, originalLanguage);
+          if (!langs.includes(activeLanguage)) return false;
+          return streamMatchesHeight(s);
         });
 
         if (match) {
           candidate = { ...match, providerName: prov.providerName };
+          targetGroup = group;
           break;
         }
+      }
+      if (candidate) break;
+    }
+
+    // 3. Fallback: match by target quality across engines if activeLanguage has no explicit match
+    if (!candidate) {
+      for (const group of orderedProviders) {
+        for (const prov of group.results) {
+          const match = prov.streams.find((s) => isPlayableStream(s) && streamMatchesHeight(s));
+          if (match) {
+            candidate = { ...match, providerName: prov.providerName };
+            targetGroup = group;
+            break;
+          }
+        }
+        if (candidate) break;
       }
     }
 
     if (candidate && candidate.link !== selectedStream?.link) {
       resumeTimeRef.current = videoRef.current?.currentTime || currentTime || 0;
+      if (targetGroup && targetGroup.key !== activeServerProvider) {
+        setActiveServerProvider(targetGroup.key);
+        setProviderResults(targetGroup.results);
+      }
       setSelectedStream(candidate);
     }
   };
@@ -2242,92 +2269,70 @@ export default function NativeWebPlayer({
     }
   };
 
-  // Smart Auto Failover to alternative server if current server fails or stalls
+  // Smart Auto Failover across all Gateway engines if current stream fails or stalls
   const handleAutoFailover = useCallback(() => {
-    if (!selectedStream || providerResults.length === 0) return false;
+    if (!selectedStream) return false;
 
-    // Mark current failing stream so we don't retry it in a ping-pong loop
     failedStreamLinksRef.current.add(selectedStream.link);
 
-    // 1. First priority: alternative stream with matching active language
-    for (const prov of providerResults) {
-      const altMatch = prov.streams.find((s) => {
-        const isPlayable =
-          isPlayableStream(s) &&
-          s.link !== selectedStream.link &&
-          !failedStreamLinksRef.current.has(s.link);
-        if (!isPlayable) return false;
+    const orderedEngines: Array<{ key: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy'; results: ProviderResult[] }> = [
+      { key: activeServerProvider, results: providerResults },
+      { key: 'vidrift', results: vidriftResults },
+      { key: 'vidly', results: vidlyResults },
+      { key: 'vidbolt', results: vidboltResults },
+      { key: 'vidy', results: vidyResults },
+    ];
 
-        const langs = getStreamAudioLanguages(s, prov.infoTitle, originalLanguage);
-        return langs.includes(activeLanguage);
-      });
+    // 1. First priority: alternative stream matching activeLanguage across all engines
+    for (const engine of orderedEngines) {
+      for (const prov of engine.results) {
+        const altMatch = prov.streams.find((s) => {
+          const isPlayable =
+            isPlayableStream(s) &&
+            s.link !== selectedStream.link &&
+            !failedStreamLinksRef.current.has(s.link);
+          if (!isPlayable) return false;
 
-      if (altMatch) {
-        console.log(`[Player] Auto-failover to alternative server: ${prov.providerName} (${altMatch.server})`);
-        resumeTimeRef.current = videoRef.current?.currentTime || currentTime || 0;
-        setSelectedStream({ ...altMatch, providerName: prov.providerName });
-        return true;
-      }
-    }
-
-    // 2. Secondary fallback: any other playable stream in current provider that hasn't failed yet
-    for (const prov of providerResults) {
-      const fallbackMatch = prov.streams.find((s) => {
-        return (
-          isPlayableStream(s) &&
-          s.link !== selectedStream.link &&
-          !failedStreamLinksRef.current.has(s.link)
-        );
-      });
-
-      if (fallbackMatch) {
-        console.log(`[Player] Secondary auto-failover to alternative server: ${prov.providerName} (${fallbackMatch.server})`);
-        resumeTimeRef.current = videoRef.current?.currentTime || currentTime || 0;
-        setSelectedStream({ ...fallbackMatch, providerName: prov.providerName });
-        return true;
-      }
-    }
-
-    // 3. Standby Fallback (Vidy): If primary provider (Vidly) has exhausted all streams, activate Vidy!
-    if (standbyFallbackRef.current?.results?.length) {
-      console.log('[Player] Primary streams exhausted. Activating Standby Fallback (Vidy)...');
-      const fallbackResults = standbyFallbackRef.current.results;
-      standbyFallbackRef.current = null; // Clear so we don't re-enter in a loop
-      setActiveServerProvider('vidy');
-      setVidyResults(fallbackResults);
-      setProviderResults(fallbackResults);
-
-      // Try matching active language in Vidy
-      for (const prov of fallbackResults) {
-        const langMatch = prov.streams.find((s: StreamItem) => {
-          if (!isPlayableStream(s) || failedStreamLinksRef.current.has(s.link)) return false;
           const langs = getStreamAudioLanguages(s, prov.infoTitle, originalLanguage);
           return langs.includes(activeLanguage);
         });
-        if (langMatch) {
-          console.log(`[Player] Fallback Vidy stream selected with language ${activeLanguage}: ${langMatch.server}`);
+
+        if (altMatch) {
           resumeTimeRef.current = videoRef.current?.currentTime || currentTime || 0;
-          setSelectedStream({ ...langMatch, providerName: prov.providerName });
+          if (engine.key !== activeServerProvider) {
+            setActiveServerProvider(engine.key);
+            setProviderResults(engine.results);
+          }
+          setSelectedStream({ ...altMatch, providerName: prov.providerName });
           return true;
         }
       }
+    }
 
-      // Fallback to any playable Vidy stream
-      for (const prov of fallbackResults) {
-        const anyMatch = prov.streams.find((s: StreamItem) => {
-          return isPlayableStream(s) && !failedStreamLinksRef.current.has(s.link);
-        });
-        if (anyMatch) {
-          console.log(`[Player] Fallback Vidy stream selected: ${anyMatch.server}`);
+    // 2. Secondary fallback: any other healthy stream across all engines
+    for (const engine of orderedEngines) {
+      for (const prov of engine.results) {
+        const fallbackMatch = prov.streams.find(
+          (s) =>
+            isPlayableStream(s) &&
+            s.link !== selectedStream.link &&
+            !failedStreamLinksRef.current.has(s.link)
+        );
+
+        if (fallbackMatch) {
           resumeTimeRef.current = videoRef.current?.currentTime || currentTime || 0;
-          setSelectedStream({ ...anyMatch, providerName: prov.providerName });
+          if (engine.key !== activeServerProvider) {
+            setActiveServerProvider(engine.key);
+            setProviderResults(engine.results);
+          }
+          setSelectedStream({ ...fallbackMatch, providerName: prov.providerName });
           return true;
         }
       }
     }
 
     return false;
-  }, [selectedStream, providerResults, activeLanguage, originalLanguage, currentTime]);
+  }, [selectedStream, activeServerProvider, providerResults, vidriftResults, vidlyResults, vidboltResults, vidyResults, activeLanguage, originalLanguage, currentTime]);
 
   // Compute first playable stream (for quick-switch when MKV or error occurs)
   const firstPlayableStream = useMemo(() => {
@@ -2363,12 +2368,8 @@ export default function NativeWebPlayer({
         }
 
         const gatewayApiBase = (process.env.NEXT_PUBLIC_GATEWAY_URL || 'https://api.snapflix.indevs.in').replace(/\/$/, '');
-        const primaryApiBase = (process.env.NEXT_PUBLIC_BACKEND_URL || 'https://vidly.snapflix.indevs.in').replace(/\/$/, '');
-        const vidboltApiBase = (process.env.NEXT_PUBLIC_VIDBOLT_URL || 'https://vidbolt.snapflix.indevs.in').replace(/\/$/, '');
-        const vidriftApiBase = (process.env.NEXT_PUBLIC_VIDRIFT_URL || 'https://vidrift.snapflix.indevs.in').replace(/\/$/, '');
-        const secondaryApiBase = (process.env.NEXT_PUBLIC_BACKEND_URL_TIER2 || 'https://vidy.snapflix.indevs.in').replace(/\/$/, '');
 
-        // Reset standby fallback and results for this new media load
+        // Reset results for this new media load
         standbyFallbackRef.current = null;
         setVidlyResults([]);
         setVidboltResults([]);
@@ -2378,153 +2379,103 @@ export default function NativeWebPlayer({
         setCurrentHlsAudioTrack(-1);
         userSelectedLangRef.current = null;
 
-        // 1. Master Gateway: Fetch all 4 VPS engines unified with Hindi prioritization and cache
-        let gatewayData: any = null;
-        try {
-          const gwRes = await fetch(`${gatewayApiBase}/api/v1/resolve?${params.toString()}`);
-          if (gwRes.ok) {
-            const parsed = await gwRes.json();
-            if (parsed?.success && Array.isArray(parsed?.streams) && parsed.streams.length > 0) {
-              gatewayData = parsed;
-            }
-          }
-        } catch (gwErr) {
-          console.warn('[Player] Master Gateway resolve error, falling back to direct scrapers:', gwErr);
+        // Master Gateway ONLY: Unified orchestrator returning normalized streams & engine breakdown
+        const gwRes = await fetch(`${gatewayApiBase}/api/v1/resolve?${params.toString()}`);
+        if (!gwRes.ok) {
+          throw new Error(`Gateway returned HTTP ${gwRes.status}`);
+        }
+        const gatewayData = await gwRes.json();
+        if (!gatewayData?.success || (!Array.isArray(gatewayData?.streams) && !Array.isArray(gatewayData?.engines))) {
+          throw new Error(gatewayData?.message || 'No streams returned by SnapFlix Gateway.');
         }
 
         if (!active) return;
 
-        let chosenResults: any[] = [];
+        // Normalize engines dynamically from Gateway response
+        const engineList: any[] = Array.isArray(gatewayData.engines) ? gatewayData.engines : [];
+        const vlyStreams = (engineList.find((e) => e.engine === 'vidly')?.streams || []).filter(isPlayableStream);
+        const vbtStreams = (engineList.find((e) => e.engine === 'vidbolt')?.streams || []).filter(isPlayableStream);
+        const vrfStreams = (engineList.find((e) => e.engine === 'vidrift')?.streams || []).filter(isPlayableStream);
+        const vdyStreams = (engineList.find((e) => e.engine === 'vidy')?.streams || []).filter(isPlayableStream);
+
+        const vlyRes: ProviderResult[] = vlyStreams.length > 0 ? [{ providerValue: 'vidly', providerName: 'SnapFlix Fast', streams: vlyStreams }] : [];
+        const vbtRes: ProviderResult[] = vbtStreams.length > 0 ? [{ providerValue: 'vidbolt', providerName: 'VidBolt Turbo', streams: vbtStreams }] : [];
+        const vrfRes: ProviderResult[] = vrfStreams.length > 0 ? [{ providerValue: 'vidrift', providerName: 'VidRift HD', streams: vrfStreams }] : [];
+        const vdyRes: ProviderResult[] = vdyStreams.length > 0 ? [{ providerValue: 'vidy', providerName: 'Vidy Cloud', streams: vdyStreams }] : [];
+
+        // Capture any additional engines returned by Gateway so nothing is ever dropped
+        const knownEngineIds = new Set(['vidly', 'vidbolt', 'vidrift', 'vidy']);
+        const extraRes: ProviderResult[] = engineList
+          .filter((e) => e?.engine && !knownEngineIds.has(e.engine))
+          .map((e) => ({
+            providerValue: e.engine,
+            providerName: e.engineName || e.engine,
+            streams: (e.streams || []).filter(isPlayableStream),
+          }))
+          .filter((p) => p.streams.length > 0);
+
+        setVidlyResults(vlyRes);
+        setVidboltResults(vbtRes);
+        setVidriftResults(vrfRes);
+        setVidyResults([...vdyRes, ...extraRes]);
+
+        const isHindiStream = (s: StreamItem) => {
+          const l = (s.language || '').toLowerCase();
+          const t = (s.tag || '').toLowerCase();
+          return l.includes('hindi') || l === 'hin' || l === 'hi' || t.includes('hindi') || t.includes('[hindi]');
+        };
+
+        const flatEngineStreams: StreamItem[] = engineList.flatMap((e) =>
+          (e?.streams || []).filter(isPlayableStream).map((s: StreamItem) => ({
+            ...s,
+            providerName: e.engineName || s.providerName || e.engine,
+          }))
+        );
+        const topLevelStreams: StreamItem[] = (gatewayData.streams || []).filter(isPlayableStream);
+        const playableStreams: StreamItem[] = topLevelStreams.length > 0 ? topLevelStreams : flatEngineStreams;
+
+        const hindiStream = playableStreams.find(isHindiStream);
+        const targetStream = hindiStream || playableStreams[0] || null;
+
+        let chosenResults: ProviderResult[] = [];
         let chosenProvider: 'vidly' | 'vidbolt' | 'vidrift' | 'vidy' = 'vidly';
         let chosen: StreamItem | null = null;
 
-        if (gatewayData) {
-          // Unpack engines into individual server states simultaneously (NO progressive drip-feed!)
-          const vlyStreams = (gatewayData.engines?.find((e: any) => e.engine === 'vidly')?.streams || []).filter(isPlayableStream);
-          const vbtStreams = (gatewayData.engines?.find((e: any) => e.engine === 'vidbolt')?.streams || []).filter(isPlayableStream);
-          const vrfStreams = (gatewayData.engines?.find((e: any) => e.engine === 'vidrift')?.streams || []).filter(isPlayableStream);
-          const vdyStreams = (gatewayData.engines?.find((e: any) => e.engine === 'vidy')?.streams || []).filter(isPlayableStream);
-
-          const vlyRes = vlyStreams.length > 0 ? [{ providerValue: 'vidly', providerName: 'SnapFlix Fast', streams: vlyStreams }] : [];
-          const vbtRes = vbtStreams.length > 0 ? [{ providerValue: 'vidbolt', providerName: 'VidBolt Turbo', streams: vbtStreams }] : [];
-          const vrfRes = vrfStreams.length > 0 ? [{ providerValue: 'vidrift', providerName: 'VidRift HD', streams: vrfStreams }] : [];
-          const vdyRes = vdyStreams.length > 0 ? [{ providerValue: 'vidy', providerName: 'Vidy Cloud', streams: vdyStreams }] : [];
-
-          setVidlyResults(vlyRes);
-          setVidboltResults(vbtRes);
-          setVidriftResults(vrfRes);
-          setVidyResults(vdyRes);
-
-          // User requirement: Default & preferred language is Hindi. Fallback to English/original.
-          const isHindiStream = (s: StreamItem) => {
-            const l = (s.language || '').toLowerCase();
-            const t = (s.tag || '').toLowerCase();
-            return l.includes('hindi') || l === 'hin' || l === 'hi' || t.includes('hindi') || t.includes('[hindi]');
-          };
-
-          const playableStreams: StreamItem[] = (gatewayData.streams || []).filter(isPlayableStream);
-          const hindiStream = playableStreams.find(isHindiStream);
-          const targetStream = hindiStream || playableStreams[0] || null;
-
-          if (targetStream) {
-            // Determine provider
-            if (vrfStreams.some((s: StreamItem) => s.link === targetStream.link)) {
-              chosenProvider = 'vidrift';
-              chosenResults = vrfRes;
-              chosen = { ...targetStream, providerName: 'VidRift HD' };
-            } else if (vlyStreams.some((s: StreamItem) => s.link === targetStream.link)) {
-              chosenProvider = 'vidly';
-              chosenResults = vlyRes;
-              chosen = { ...targetStream, providerName: 'SnapFlix Fast' };
-            } else if (vbtStreams.some((s: StreamItem) => s.link === targetStream.link)) {
-              chosenProvider = 'vidbolt';
-              chosenResults = vbtRes;
-              chosen = { ...targetStream, providerName: 'VidBolt Turbo' };
-            } else if (vdyStreams.some((s: StreamItem) => s.link === targetStream.link)) {
-              chosenProvider = 'vidy';
-              chosenResults = vdyRes;
-              chosen = { ...targetStream, providerName: 'Vidy Cloud' };
-            } else {
-              if (vrfRes.length > 0) { chosenProvider = 'vidrift'; chosenResults = vrfRes; }
-              else if (vlyRes.length > 0) { chosenProvider = 'vidly'; chosenResults = vlyRes; }
-              else if (vbtRes.length > 0) { chosenProvider = 'vidbolt'; chosenResults = vbtRes; }
-              else { chosenProvider = 'vidy'; chosenResults = vdyRes; }
-              chosen = targetStream;
-            }
-
-            if (hindiStream) {
-              setActiveLanguage('Hindi');
-            } else if (isHlsStream(targetStream)) {
-              setActiveLanguage('Hindi');
-            } else {
-              const langs = getStreamAudioLanguages(targetStream, chosenResults[0]?.infoTitle, originalLanguage);
-              setActiveLanguage(langs[0] || 'English');
-            }
-          }
-        } else {
-          // Direct fallback to 4 scrapers if Master Gateway is unreachable
-          const primaryUrl = `${primaryApiBase}/api/provider/resolve?${params.toString()}`;
-          const vidboltUrl = `${vidboltApiBase}/api/provider/resolve?${params.toString()}`;
-          const vidriftUrl = `${vidriftApiBase}/api/provider/resolve?${params.toString()}`;
-          const secUrl = `${secondaryApiBase}/api/provider/resolve?${params.toString()}`;
-
-          const [pRes, vbRes, vrRes, secRes] = await Promise.allSettled([
-            fetch(primaryUrl).then((r) => (r.ok ? r.json() : null)),
-            fetch(vidboltUrl).then((r) => (r.ok ? r.json() : null)),
-            fetch(vidriftUrl).then((r) => (r.ok ? r.json() : null)),
-            fetch(secUrl).then((r) => (r.ok ? r.json() : null)),
-          ]);
-
-          if (!active) return;
-
-          const pData = pRes.status === 'fulfilled' ? pRes.value : null;
-          const vbData = vbRes.status === 'fulfilled' ? vbRes.value : null;
-          const vrData = vrRes.status === 'fulfilled' ? vrRes.value : null;
-          const secData = secRes.status === 'fulfilled' ? secRes.value : null;
-
-          if (pData?.results) setVidlyResults(pData.results);
-          if (vbData?.results) setVidboltResults(vbData.results);
-          if (vrData?.results) setVidriftResults(vrData.results);
-          if (secData?.results) setVidyResults(secData.results);
-
-          const allGroups: Array<{ key: 'vidrift' | 'vidly' | 'vidbolt' | 'vidy'; results: any[] }> = [
-            { key: 'vidrift', results: vrData?.results || [] },
-            { key: 'vidly', results: pData?.results || [] },
-            { key: 'vidbolt', results: vbData?.results || [] },
-            { key: 'vidy', results: secData?.results || [] },
-          ];
-
-          for (const g of allGroups) {
-            for (const prov of g.results) {
-              const hMatch = prov.streams?.find((s: StreamItem) => {
-                if (!isPlayableStream(s)) return false;
-                const langs = getStreamAudioLanguages(s, prov.infoTitle, originalLanguage);
-                return langs.includes('Hindi');
-              });
-              if (hMatch) {
-                chosen = { ...hMatch, providerName: prov.providerName };
-                chosenProvider = g.key;
-                chosenResults = g.results;
-                setActiveLanguage('Hindi');
-                break;
-              }
-            }
-            if (chosen) break;
+        if (targetStream) {
+          if (vrfStreams.some((s: StreamItem) => s.link === targetStream.link)) {
+            chosenProvider = 'vidrift';
+            chosenResults = vrfRes;
+            chosen = { ...targetStream, providerName: 'VidRift HD' };
+          } else if (vlyStreams.some((s: StreamItem) => s.link === targetStream.link)) {
+            chosenProvider = 'vidly';
+            chosenResults = vlyRes;
+            chosen = { ...targetStream, providerName: 'SnapFlix Fast' };
+          } else if (vbtStreams.some((s: StreamItem) => s.link === targetStream.link)) {
+            chosenProvider = 'vidbolt';
+            chosenResults = vbtRes;
+            chosen = { ...targetStream, providerName: 'VidBolt Turbo' };
+          } else if (vdyStreams.some((s: StreamItem) => s.link === targetStream.link)) {
+            chosenProvider = 'vidy';
+            chosenResults = vdyRes;
+            chosen = { ...targetStream, providerName: 'Vidy Cloud' };
+          } else {
+            if (vrfRes.length > 0) { chosenProvider = 'vidrift'; chosenResults = vrfRes; }
+            else if (vlyRes.length > 0) { chosenProvider = 'vidly'; chosenResults = vlyRes; }
+            else if (vbtRes.length > 0) { chosenProvider = 'vidbolt'; chosenResults = vbtRes; }
+            else if (vdyRes.length > 0) { chosenProvider = 'vidy'; chosenResults = vdyRes; }
+            else { chosenProvider = 'vidy'; chosenResults = extraRes; }
+            chosen = targetStream;
           }
 
-          if (!chosen) {
-            for (const g of allGroups) {
-              if (g.results.length > 0) {
-                const match = g.results[0]?.streams?.find((s: StreamItem) => isPlayableStream(s));
-                if (match) {
-                  chosen = { ...match, providerName: g.results[0].providerName };
-                  chosenProvider = g.key;
-                  chosenResults = g.results;
-                  setActiveLanguage(isHlsStream(match) ? 'Hindi' : 'English');
-                  break;
-                }
-              }
-            }
+          if (chosenResults.length === 0 && playableStreams.length > 0) {
+            chosenResults = [{ providerValue: chosenProvider, providerName: targetStream.providerName || 'SnapFlix Gateway', streams: playableStreams }];
+          }
+
+          if (hindiStream) {
+            setActiveLanguage('Hindi');
+          } else {
+            const langs = getStreamAudioLanguages(targetStream, chosenResults[0]?.infoTitle, originalLanguage);
+            setActiveLanguage(langs[0] || 'English');
           }
         }
 
@@ -2552,36 +2503,8 @@ export default function NativeWebPlayer({
     };
   }, [tmdbId, title, year, type, season, episode]);
 
-  // 2. Playable URL with Proxy rewrite
+  // 2. Playable URL (Gateway returns ready-to-play / pre-proxied links per engine)
   const getPlayableUrl = useCallback((stream: StreamItem) => {
-    // If stream is already proxied through our edge gateway or backend proxy, or is direct VidRift / Milkyway CORS CDN, do not proxy
-    if (
-      stream.link.includes('proxy-stream') ||
-      stream.link.includes('/api/proxy') ||
-      stream.link.includes('milkyway.cymru') ||
-      stream.link.includes('vidrift.')
-    ) {
-      return stream.link;
-    }
-
-    const vpsApiBase = (process.env.NEXT_PUBLIC_BACKEND_URL_TIER2 || 'https://vidy.snapflix.indevs.in').replace(/\/$/, '');
-
-    // streamrip.fun and rousav.tech require proxying to bypass CORS and hotlink filters (Oracle VPS handles both cleanly)
-    if (stream.link.includes('streamrip.fun') || stream.link.includes('rousav.tech')) {
-      return `${vpsApiBase}/api/proxy/stream?v=2&url=${encodeURIComponent(stream.link)}`;
-    }
-
-    const hasHeaders = stream.headers && Object.keys(stream.headers).length > 0;
-
-    // Streams with custom request headers (e.g. Referer or Origin like Movy/Phoenix) MUST be routed through
-    // proxy because the browser cannot set custom Referer/Origin headers on XMLHttpRequest.
-    // Streams without custom headers play directly in the browser to avoid server bottlenecks.
-    if (hasHeaders) {
-      const headersJson = JSON.stringify(stream.headers || {});
-      return `${vpsApiBase}/api/proxy/stream?v=2&url=${encodeURIComponent(
-        stream.link
-      )}&headers=${encodeURIComponent(headersJson)}`;
-    }
     return stream.link;
   }, []);
 
@@ -2761,24 +2684,10 @@ export default function NativeWebPlayer({
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
-                // If direct stream failed, attempt proxy fallback once via dedicated VPS proxy
-                if (hls.url && !hls.url.includes('proxy-stream') && !hls.url.includes('/api/proxy')) {
-                  const vpsApiBase = (process.env.NEXT_PUBLIC_BACKEND_URL_TIER2 || 'https://vidy.snapflix.indevs.in').replace(/\/$/, '');
-                  const headersJson = JSON.stringify(selectedStream.headers || {});
-                  const proxyUrl = `${vpsApiBase}/api/proxy/stream?v=2&url=${encodeURIComponent(
-                    selectedStream.link
-                  )}&headers=${encodeURIComponent(headersJson)}`;
-                  console.warn('[Player] Direct stream failed, attempting VPS proxy fallback:', proxyUrl);
-                  hls.loadSource(proxyUrl);
-                  hls.startLoad();
-                  return;
-                }
-
-                // If proxy or stream failed, auto-switch to next available server
-                console.warn('[Player] Network error on stream. Triggering auto-failover to alternative server...');
+                console.warn('[Player] Network error on stream. Triggering auto-failover across Gateway engines...');
                 if (!handleAutoFailover()) {
                   setPlaybackError(
-                    'This stream server is currently offline or returning Bad Gateway (502). Please select another server from the Servers menu below.'
+                    'Playback stream is currently unreachable. Please try switching quality or audio track.'
                   );
                   hls.destroy();
                 }
@@ -3838,9 +3747,9 @@ export default function NativeWebPlayer({
           </div>
         </div>
 
-        {/* Top-Right Actions: Servers + Quality + Audio & Subtitles + Next Episode */}
+        {/* Top-Right Actions: Quality + Audio & Subtitles + Next Episode */}
         <div className="flex items-center gap-2 sm:gap-3 pointer-events-auto">
-          {/* Server & Quality Button with 2-Column Popover */}
+          {/* Quality Button with Clean Single-Column Popover (Servers managed automatically by Gateway) */}
           <div
             className="relative"
             ref={serverQualityMenuRef}
@@ -3852,7 +3761,7 @@ export default function NativeWebPlayer({
               onClick={(e) => {
                 e.stopPropagation();
                 if (isMobileScreen()) {
-                  setMobileDrawerTab('servers');
+                  setMobileDrawerTab('quality');
                   setShowMobileDrawer(true);
                   return;
                 }
@@ -3863,89 +3772,45 @@ export default function NativeWebPlayer({
                 triggerControls();
               }}
               className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-black/40 hover:bg-black/60 border border-white/15 text-xs font-semibold text-white/90 hover:text-white transition cursor-pointer backdrop-blur-md active:scale-95 shadow-md shrink-0 pointer-events-auto"
-              title="Quality & Server"
+              title="Quality"
             >
               <IoServerOutline size={15} className="text-white/80" />
-              <span className="hidden sm:inline">Quality & Server</span>
+              <span className="hidden sm:inline">Quality</span>
             </button>
 
-            {/* Netflix-style 2-Column Server & Quality Popover Window - Desktop (sm+) */}
+            {/* Clean Quality Popover Window - Desktop (sm+) */}
             {showServerQualityMenu && (
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="hidden sm:flex absolute top-full right-0 mt-2.5 w-[460px] md:w-[480px] bg-[#141414]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_16px_50px_rgba(0,0,0,0.95)] ring-1 ring-white/5 p-3.5 z-50 flex-row overflow-hidden text-white animate-in fade-in zoom-in-95 duration-150"
+                className="hidden sm:flex absolute top-full right-0 mt-2.5 w-[210px] md:w-[230px] bg-[#141414]/95 backdrop-blur-2xl border border-white/10 rounded-2xl shadow-[0_16px_50px_rgba(0,0,0,0.95)] ring-1 ring-white/5 p-3 z-50 flex-col overflow-hidden text-white animate-in fade-in zoom-in-95 duration-150"
               >
-                {/* Left Column: Quality */}
-                <div className="flex-1 flex flex-col min-w-0 pr-3">
-                  <div className="px-2 py-1.5 text-[11px] font-bold text-gray-300 uppercase tracking-wider border-b border-white/10 flex items-center gap-1.5 mb-1.5 shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] shrink-0" />
-                    <span>Quality</span>
-                  </div>
-
-                  <div className="max-h-[min(300px,calc(100vh-160px))] overflow-y-auto space-y-0.5 p-0.5 pr-1">
-                    {availableQualities.map((q) => {
-                      const isSelected = selectedQuality === q.key;
-                      return (
-                        <button
-                          key={q.key}
-                          type="button"
-                          onClick={() => handleSelectQuality(q.key)}
-                          className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center justify-between transition cursor-pointer ${isSelected
-                              ? 'bg-red-600/15 text-white font-semibold border border-red-500/30'
-                              : 'text-gray-300 hover:bg-white/[0.06] hover:text-white'
-                            }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="w-3.5 text-center shrink-0">
-                              {isSelected && <IoCheckmark size={14} className="text-[#E50914] inline font-bold" />}
-                            </span>
-                            <span className="text-[11px] font-medium truncate">{q.label}</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="px-2 py-1.5 text-[11px] font-bold text-gray-300 uppercase tracking-wider border-b border-white/10 flex items-center gap-1.5 mb-1.5 shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] shrink-0" />
+                  <span>Quality</span>
                 </div>
 
-                {/* Vertical Partition / Divider */}
-                <div className="w-[1px] bg-white/10 self-stretch my-1 shrink-0" />
-
-                {/* Right Column: Server */}
-                <div className="flex-1 flex flex-col min-w-0 pl-3">
-                  <div className="px-2 py-1.5 text-[11px] font-bold text-gray-300 uppercase tracking-wider border-b border-white/10 flex items-center gap-1.5 mb-1.5 shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] shrink-0" />
-                    <span>Server</span>
-                  </div>
-
-                  <div className="max-h-[min(300px,calc(100vh-160px))] overflow-y-auto space-y-0.5 p-0.5 pr-1">
-                    {availableServers.length > 0 ? (
-                      availableServers.map((server) => {
-                        const isActive =
-                          activeServerProvider === server.provider ||
-                          server.streams.some((s) => s.link === selectedStream?.link);
-                        return (
-                          <button
-                            key={server.id}
-                            type="button"
-                            onClick={() => handleSelectServerOption(server)}
-                            className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center justify-between transition cursor-pointer ${isActive
-                                ? 'bg-red-600/15 text-white font-semibold border border-red-500/30'
-                                : 'text-gray-300 hover:bg-white/[0.06] hover:text-white'
-                              }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="w-3.5 text-center shrink-0">
-                                {isActive && <IoCheckmark size={14} className="text-[#E50914] inline font-bold" />}
-                              </span>
-                              <span className="text-[11px] font-medium truncate">{server.name}</span>
-                            </div>
-                          </button>
-                        );
-                      })
-                    ) : (
-                      <div className="px-2.5 py-2 text-[11px] text-gray-500 italic">No servers available</div>
-                    )}
-                  </div>
+                <div className="max-h-[min(300px,calc(100vh-160px))] overflow-y-auto space-y-0.5 p-0.5 pr-1">
+                  {availableQualities.map((q) => {
+                    const isSelected = selectedQuality === q.key;
+                    return (
+                      <button
+                        key={q.key}
+                        type="button"
+                        onClick={() => handleSelectQuality(q.key)}
+                        className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center justify-between transition cursor-pointer ${isSelected
+                            ? 'bg-red-600/15 text-white font-semibold border border-red-500/30'
+                            : 'text-gray-300 hover:bg-white/[0.06] hover:text-white'
+                          }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-3.5 text-center shrink-0">
+                            {isSelected && <IoCheckmark size={14} className="text-[#E50914] inline font-bold" />}
+                          </span>
+                          <span className="text-[11px] font-medium truncate">{q.label}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -4606,7 +4471,7 @@ export default function NativeWebPlayer({
               {/* Top Drag Handle */}
               <div className="w-12 h-1.5 rounded-full bg-white/20 mx-auto mb-3 shrink-0" />
 
-              {/* Header Row with Tabs: Server | Quality | Audio | Subtitles */}
+              {/* Header Row with Tabs: Quality | Audio | Subtitles */}
               <div className="flex items-center justify-between pb-3 mb-2 border-b border-white/10 shrink-0">
                 <div className="flex items-center gap-1.5 p-1 bg-white/10 rounded-xl overflow-x-auto scrollbar-none max-w-[calc(100%-40px)]">
                   <button
@@ -4620,18 +4485,6 @@ export default function NativeWebPlayer({
                     )}
                   >
                     Quality
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMobileDrawerTab('servers')}
-                    className={cn(
-                      "px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap",
-                      mobileDrawerTab === 'servers'
-                        ? "bg-[#E50914] text-white shadow-sm"
-                        : "text-gray-400 hover:text-white"
-                    )}
-                  >
-                    Server
                   </button>
                   <button
                     type="button"
@@ -4709,42 +4562,6 @@ export default function NativeWebPlayer({
                       </button>
                     );
                   })}
-                </div>
-              )}
-
-              {/* Tab: Server */}
-              {mobileDrawerTab === 'servers' && (
-                <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5 pr-0.5">
-                  {availableServers.length > 0 ? (
-                    availableServers.map((server) => {
-                      const isActive =
-                        activeServerProvider === server.provider ||
-                        server.streams.some((s) => s.link === selectedStream?.link);
-                      return (
-                        <button
-                          key={`mobile-server-${server.id}`}
-                          type="button"
-                          onClick={() => {
-                            handleSelectServerOption(server);
-                            setShowMobileDrawer(false);
-                          }}
-                          className={`w-full px-3.5 py-2.5 rounded-xl text-left flex items-center justify-between transition cursor-pointer active:scale-[0.99] ${isActive
-                              ? 'bg-red-600/20 text-white font-bold border border-red-500/40 shadow-sm'
-                              : 'text-gray-300 hover:bg-white/[0.08] hover:text-white bg-white/[0.03]'
-                            }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="w-4 text-center shrink-0">
-                              {isActive && <IoCheckmark size={15} className="text-[#E50914] font-black inline" />}
-                            </span>
-                            <span className="text-xs font-medium truncate">{server.name}</span>
-                          </div>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="px-3 py-2 text-xs text-gray-400 italic">No servers available</div>
-                  )}
                 </div>
               )}
 
