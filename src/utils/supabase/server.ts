@@ -3,18 +3,25 @@ import { cookies } from "next/headers";
 import { env } from "../env";
 import { Database } from "./types";
 
+const FALLBACK_SUPABASE_URL = "https://rfmsstwvhuhsqlfgcnvg.supabase.co";
+const FALLBACK_SUPABASE_KEY = "sb_publishable_fvvhJ8fmUdrl-8XYddycAw_nq_knozm";
+
 export async function createClient(admin?: boolean) {
   const cookieStore = await cookies();
 
+  const rawUrl = env.NEXT_PUBLIC_SUPABASE_URL;
   const url =
-    env.NEXT_PUBLIC_SUPABASE_URL?.startsWith("http") &&
-    !env.NEXT_PUBLIC_SUPABASE_URL.includes("your_supabase_url")
-      ? env.NEXT_PUBLIC_SUPABASE_URL
-      : "https://placeholder.supabase.co";
+    rawUrl?.startsWith("http") &&
+    !rawUrl.includes("your_supabase_url") &&
+    !rawUrl.includes("placeholder.supabase.co")
+      ? rawUrl
+      : FALLBACK_SUPABASE_URL;
 
   const key = admin
-    ? env.SUPABASE_SERVICE_ROLE_KEY || "placeholder-admin-key"
-    : env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "placeholder-key";
+    ? env.SUPABASE_SERVICE_ROLE_KEY || FALLBACK_SUPABASE_KEY
+    : (env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY && !env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.includes("placeholder"))
+      ? env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+      : FALLBACK_SUPABASE_KEY;
 
   return createServerClient<Database>(url, key, {
     cookies: {
