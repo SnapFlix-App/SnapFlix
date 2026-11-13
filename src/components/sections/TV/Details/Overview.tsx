@@ -3,6 +3,7 @@
 import { Image, Chip, Button } from "@heroui/react";
 import { getImageUrl, mutateTvShowTitle } from "@/utils/movies";
 import BookmarkButton from "@/components/ui/button/BookmarkButton";
+import LikeButton from "@/components/ui/button/LikeButton";
 import ShareButton from "@/components/ui/button/ShareButton";
 import { AppendToResponse } from "tmdb-ts/dist/types/options";
 import { useDocumentTitle } from "@mantine/hooks";
@@ -111,6 +112,7 @@ export const TvShowOverviewSection: React.FC<TvShowOverviewSectionProps> = ({
             <div className="flex flex-wrap gap-2">
               <ShareButton id={tv.id} title={title} type="tv" />
               <BookmarkButton data={bookmarkData} />
+              <LikeButton data={bookmarkData} />
             </div>
           </div>
 

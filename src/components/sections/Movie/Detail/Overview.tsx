@@ -3,6 +3,7 @@
 import { Image, Chip, Button } from "@heroui/react";
 import { getImageUrl, movieDurationString, mutateMovieTitle } from "@/utils/movies";
 import BookmarkButton from "@/components/ui/button/BookmarkButton";
+import LikeButton from "@/components/ui/button/LikeButton";
 import { MovieDetails } from "tmdb-ts/dist/types/movies";
 import Rating from "../../../ui/other/Rating";
 import ShareButton from "@/components/ui/button/ShareButton";
@@ -104,6 +105,7 @@ const OverviewSection: React.FC<OverviewSectionProps> = ({ movie }) => {
             <div className="flex flex-wrap gap-2">
               <ShareButton id={movie.id} title={title} />
               <BookmarkButton data={bookmarkData} />
+              <LikeButton data={bookmarkData} />
             </div>
           </div>
 

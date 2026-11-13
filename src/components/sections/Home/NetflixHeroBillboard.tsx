@@ -2,6 +2,7 @@
 
 import { getRecommendationsFromHistory, getTrendingMovies, getTrendingTvShows } from "@/actions/lists";
 import BookmarkButton from "@/components/ui/button/BookmarkButton";
+import LikeButton from "@/components/ui/button/LikeButton";
 import CatalogErrorState from "@/components/ui/other/CatalogErrorState";
 import PopcornTvLoader from "@/components/ui/other/PopcornTvLoader";
 import { useWatchHistory } from "@/hooks/useWatchHistory";
@@ -341,6 +342,10 @@ const NetflixHeroBillboard: React.FC<NetflixHeroBillboardProps> = ({ contentType
                       Info
                     </Link>
                     <BookmarkButton
+                      data={bookmarkData}
+                      className="sf-chip size-11 min-w-11 rounded-full bg-transparent text-white shadow-none"
+                    />
+                    <LikeButton
                       data={bookmarkData}
                       className="sf-chip size-11 min-w-11 rounded-full bg-transparent text-white shadow-none"
                     />

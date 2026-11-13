@@ -151,6 +151,45 @@ export type Database = {
         }
         Relationships: []
       }
+      liked: {
+        Row: {
+          adult: boolean
+          backdrop_path: string | null
+          created_at: string
+          id: number
+          poster_path: string | null
+          release_date: string
+          title: string
+          type: string
+          user_id: string
+          vote_average: number
+        }
+        Insert: {
+          adult?: boolean
+          backdrop_path?: string | null
+          created_at?: string
+          id: number
+          poster_path?: string | null
+          release_date?: string
+          title: string
+          type: string
+          user_id: string
+          vote_average?: number
+        }
+        Update: {
+          adult?: boolean
+          backdrop_path?: string | null
+          created_at?: string
+          id?: number
+          poster_path?: string | null
+          release_date?: string
+          title?: string
+          type?: string
+          user_id?: string
+          vote_average?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

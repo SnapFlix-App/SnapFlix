@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import BookmarkButton from "@/components/ui/button/BookmarkButton";
+import LikeButton from "@/components/ui/button/LikeButton";
 import MarkCompletedButton from "@/components/ui/button/MarkCompletedButton";
 import ShareButton from "@/components/ui/button/ShareButton";
 import Trailer from "@/components/ui/overlay/Trailer";
@@ -153,6 +154,7 @@ const DetailHeroBillboard: React.FC<DetailHeroBillboardProps> = ({
           {videos.length > 0 && <Trailer videos={videos} appearance="chip" />}
           {!isTv && <MarkCompletedButton movieId={media.id} />}
           <BookmarkButton data={bookmarkData} className={iconChip} />
+          <LikeButton data={bookmarkData} className={iconChip} />
           <ShareButton id={media.id} title={title} type={type} className={iconChip} />
         </div>
       </div>

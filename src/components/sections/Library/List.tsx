@@ -1,6 +1,7 @@
 "use client";
 
 import { getWatchlist, removeAllWatchlist } from "@/actions/library";
+import { getLiked, removeAllLiked } from "@/actions/liked";
 import { queryClient } from "@/app/providers";
 import BackToTopButton from "@/components/ui/button/BackToTopButton";
 import ContentTypeSelection from "@/components/ui/other/ContentTypeSelection";
@@ -19,9 +20,12 @@ import { ITEMS_PER_PAGE } from "@/utils/constants";
 import ConfirmationModal from "@/components/ui/overlay/ConfirmationModal";
 import Link from "next/link";
 import { TbFolder } from "react-icons/tb";
+import { BsBookmarkFill } from "react-icons/bs";
+import { IoHeart } from "react-icons/io5";
 
 type SortOption = "title" | "release_date" | "vote_average" | "created_at";
 type FilterType = "movie" | "tv" | "all";
+type LibraryTab = "watchlist" | "liked";
 
 const SORT_OPTIONS: { key: SortOption; label: string }[] = [
   { key: "title", label: "Title" },
@@ -35,14 +39,18 @@ const LibraryList = () => {
   const { content } = useDiscoverFilters();
   const { data: user, isLoading: isUserLoading } = useSupabaseUser();
   const [isPending, startTransition] = useTransition();
+  const [activeTab, setActiveTab] = useState<LibraryTab>("watchlist");
   const [sortOption, setSortOption] = useState<SortOption>("created_at");
   const [opened, { open, close }] = useDisclosure(false);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, status, refetch } =
     useInfiniteQuery({
-      queryKey: ["watchlist", content, user?.id],
+      queryKey: [activeTab, content, user?.id],
       queryFn: async ({ pageParam = 1 }) => {
         if (!user) return { success: true, data: [], hasNextPage: false };
+        if (activeTab === "liked") {
+          return await getLiked(content as FilterType, pageParam, ITEMS_PER_PAGE);
+        }
         return await getWatchlist(content as FilterType, pageParam, ITEMS_PER_PAGE);
       },
       initialPageParam: 1,
@@ -62,22 +70,27 @@ const LibraryList = () => {
     }
   }, [inViewport]);
 
-  const clearWatchlistMutation = useMutation({
+  const clearMutation = useMutation({
     mutationFn: async (type: "movie" | "tv") => {
       if (!user) throw new Error("User not authenticated");
-      const result = await removeAllWatchlist(type);
+      const result =
+        activeTab === "liked"
+          ? await removeAllLiked(type)
+          : await removeAllWatchlist(type);
       if (!result.success) {
-        throw new Error(result.error || "Failed to clear watchlist");
+        throw new Error(result.error || `Failed to clear ${activeTab}`);
       }
       const allItems = data?.pages.flatMap((page) => page.data || []) || [];
       const count = allItems.filter((item) => item.type === type).length;
       return { type, count };
     },
     onSuccess: ({ type, count }) => {
-      queryClient.invalidateQueries({ queryKey: ["watchlist"] });
+      queryClient.invalidateQueries({ queryKey: [activeTab] });
 
       addToast({
-        title: `Cleared ${count} ${type === "movie" ? "movies" : "TV shows"} from your watchlist!`,
+        title: `Cleared ${count} ${type === "movie" ? "movies" : "TV shows"} from your ${
+          activeTab === "liked" ? "liked list" : "watchlist"
+        }!`,
         color: "success",
         icon: <Trash />,
       });
@@ -87,14 +100,14 @@ const LibraryList = () => {
     onError: (error) => {
       addToast({
         title: "Error",
-        description: "Failed to clear watchlist. Please try again.",
+        description: `Failed to clear ${activeTab}. Please try again.`,
         color: "danger",
       });
-      console.error("Clear watchlist error:", error);
+      console.error(`Clear ${activeTab} error:`, error);
     },
   });
 
-  const sortedWatchlist = useMemo(() => {
+  const sortedItems = useMemo(() => {
     if (!data?.pages) return [];
 
     const allItems = data.pages.flatMap((page) => page.data || []);
@@ -103,26 +116,26 @@ const LibraryList = () => {
       switch (sortOption) {
         case "vote_average":
         case "release_date":
-          return b[sortOption] > a[sortOption] ? 1 : -1;
+          return (b[sortOption] ?? 0) > (a[sortOption] ?? 0) ? 1 : -1;
         case "created_at":
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         case "title":
         default:
-          return a.title.localeCompare(b.title);
+          return (a.title || "").localeCompare(b.title || "");
       }
     });
   }, [data?.pages, sortOption]);
 
-  const confirmClearWatchlist = () => {
+  const confirmClear = () => {
     startTransition(() => {
-      clearWatchlistMutation.mutate(content);
+      clearMutation.mutate(content);
     });
   };
 
   if (status === "error") {
     return (
       <div className="flex h-[50vh] flex-col items-center justify-center gap-4">
-        <p className="text-danger">Failed to load watchlist</p>
+        <p className="text-danger">Failed to load {activeTab}</p>
         <Button color="primary" onPress={() => refetch()}>
           Try Again
         </Button>
@@ -130,7 +143,7 @@ const LibraryList = () => {
     );
   }
 
-  const hasItems = !isEmpty(sortedWatchlist);
+  const hasItems = !isEmpty(sortedItems);
 
   return (
     <>
@@ -146,13 +159,41 @@ const LibraryList = () => {
               </div>
               {hasItems && (
                 <span className="text-xs sm:text-sm font-semibold px-2.5 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
-                  {sortedWatchlist.length} {sortedWatchlist.length === 1 ? "item" : "items"}
+                  {sortedItems.length} {sortedItems.length === 1 ? "item" : "items"}
                 </span>
               )}
             </div>
             <p className="text-xs sm:text-sm text-gray-400 mt-1">
-              Your saved {content === "movie" ? "movies" : "TV shows"} and custom watchlist
+              Your saved {content === "movie" ? "movies" : "TV shows"}, watchlist, and liked favorites
             </p>
+
+            {/* Tab selection: Watchlist vs Liked */}
+            <div className="flex items-center gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setActiveTab("watchlist")}
+                className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition ${
+                  activeTab === "watchlist"
+                    ? "bg-[#E50914] text-white shadow-md shadow-red-600/30"
+                    : "bg-[#202020] text-gray-400 hover:text-white hover:bg-[#282828]"
+                }`}
+              >
+                <BsBookmarkFill size={13} />
+                Watchlist
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("liked")}
+                className={`inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition ${
+                  activeTab === "liked"
+                    ? "bg-[#E50914] text-white shadow-md shadow-red-600/30"
+                    : "bg-[#202020] text-gray-400 hover:text-white hover:bg-[#282828]"
+                }`}
+              >
+                <IoHeart size={14} />
+                Liked
+              </button>
+            </div>
           </div>
 
           {/* Action buttons (Clear button on tablet/desktop/TV) */}
@@ -167,9 +208,9 @@ const LibraryList = () => {
                 onPress={() => {
                   if (user) open();
                 }}
-                isLoading={clearWatchlistMutation.isPending || isPending}
+                isLoading={clearMutation.isPending || isPending}
               >
-                Clear Watchlist
+                Clear {activeTab === "liked" ? "Liked" : "Watchlist"}
               </Button>
             </div>
           )}
@@ -209,7 +250,7 @@ const LibraryList = () => {
               <div className="sm:hidden shrink-0">
                 <Button
                   isIconOnly
-                  aria-label="Clear Watchlist"
+                  aria-label={`Clear ${activeTab}`}
                   color="danger"
                   variant="flat"
                   size="md"
@@ -217,7 +258,7 @@ const LibraryList = () => {
                   onPress={() => {
                     if (user) open();
                   }}
-                  isLoading={clearWatchlistMutation.isPending || isPending}
+                  isLoading={clearMutation.isPending || isPending}
                 >
                   <Trash />
                 </Button>
@@ -226,91 +267,68 @@ const LibraryList = () => {
           </div>
         </div>
 
-        {status === "pending" ? (
-          <Spinner
-            size="lg"
-            variant="simple"
-            className="absolute-center mt-[30vh]"
-            color="primary"
-          />
-        ) : hasItems ? (
-          <>
-            <div className="movie-grid">
-              {sortedWatchlist.map((data) => {
-                if (data.type === "tv") {
-                  return (
-                    <Suspense key={`tv-${data.id}`}>
-                      <TvShowPosterCard
-                        variant="bordered"
-                        // @ts-expect-error: Type conversion for compatibility
-                        tv={{
-                          adult: data.adult,
-                          backdrop_path: data.backdrop_path,
-                          first_air_date: data.release_date,
-                          id: data.id,
-                          name: data.title,
-                          poster_path: data.poster_path || "",
-                          vote_average: data.vote_average,
-                        }}
-                      />
-                    </Suspense>
-                  );
-                }
-                return (
-                  <Suspense key={`movie-${data.id}`}>
-                    <MoviePosterCard
-                      variant="bordered"
-                      // @ts-expect-error: Type conversion for compatibility
-                      movie={{
-                        adult: data.adult,
-                        backdrop_path: data.backdrop_path,
-                        id: data.id,
-                        poster_path: data.poster_path || "",
-                        release_date: data.release_date,
-                        title: data.title,
-                        vote_average: data.vote_average,
-                      }}
-                    />
-                  </Suspense>
-                );
-              })}
+        {/* Dynamic content rendering based on data availability */}
+        {hasItems ? (
+          <div className="relative min-h-[500px]">
+            <div className="grid grid-cols-2 gap-x-2 gap-y-4 sm:grid-cols-3 sm:gap-x-4 sm:gap-y-6 md:grid-cols-4 md:gap-x-4 md:gap-y-6 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+              {sortedItems.map((item) => (
+                <Suspense
+                  key={`${item.id}-${item.type}-${item.created_at}`}
+                  fallback={
+                    <div className="flex h-full min-h-[200px] w-full items-center justify-center">
+                      <Spinner size="sm" label={getLoadingLabel()} />
+                    </div>
+                  }
+                >
+                  {item.type === "movie" ? (
+                    <MoviePosterCard movie={item as any} />
+                  ) : (
+                    <TvShowPosterCard tv={item as any} />
+                  )}
+                </Suspense>
+              ))}
             </div>
-            <div ref={ref} className="flex h-24 items-center justify-center">
+
+            {/* InViewport anchor with infinite scroll spinner */}
+            <div ref={ref} className="mt-8 flex justify-center py-4">
               {isFetchingNextPage && (
-                <Spinner
-                  size="lg"
-                  variant="wave"
-                  label={getLoadingLabel()}
-                  color="primary"
-                />
+                <div className="flex items-center gap-2 text-default-500">
+                  <Spinner size="sm" />
+                  <span className="text-sm">Loading more...</span>
+                </div>
               )}
-              {!hasNextPage && !isFetchingNextPage && sortedWatchlist.length > 0 && (
-                <p className="text-muted-foreground text-center text-base">
-                  You have reached the end of your watchlist.
+              {!hasNextPage && hasItems && (
+                <p className="text-xs text-default-400">
+                  You have reached the end of your {activeTab}.
                 </p>
               )}
             </div>
-          </>
+          </div>
         ) : (
-          <div className="flex flex-col items-center justify-center min-h-[35vh] sm:min-h-[40vh] gap-4 text-center px-4 py-12 rounded-2xl bg-white/[0.02] border border-white/5 mt-4">
-            <div className="size-16 rounded-full bg-white/5 flex items-center justify-center text-gray-500 mb-1">
-              <TbFolder className="size-8 text-gray-400" />
+          <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 text-center">
+            <div className="rounded-full bg-default-100 p-6 text-default-400">
+              {activeTab === "liked" ? <IoHeart size={48} /> : <TbFolder size={48} />}
             </div>
-            <h3 className="text-lg sm:text-xl font-bold text-white">
-              No {content === "movie" ? "movies" : "TV shows"} saved yet
-            </h3>
-            <p className="text-gray-400 text-xs sm:text-sm max-w-sm">
-              Discover and add {content === "movie" ? "movies" : "TV series"} to your personal watchlist to watch them anytime.
-            </p>
+            <div className="flex flex-col gap-1 max-w-sm">
+              <h3 className="text-lg font-semibold text-white">
+                No {content === "movie" ? "movies" : content === "tv" ? "TV series" : "items"} found in{" "}
+                {activeTab}
+              </h3>
+              <p className="text-xs text-gray-400">
+                {activeTab === "liked"
+                  ? `Tap the heart icon on any ${content === "movie" ? "movie" : "TV series"} to mark it as liked.`
+                  : `Discover and add ${content === "movie" ? "movies" : "TV series"} to your personal watchlist to watch them anytime.`}
+              </p>
+            </div>
             <Button
               as={Link}
-              href="/discover"
+              href={content === "movie" ? "/movie" : "/tv"}
               color="primary"
-              variant="shadow"
-              size="md"
-              className="mt-2 font-medium"
+              variant="flat"
+              size="sm"
+              className="mt-2 text-xs sm:text-sm font-medium"
             >
-              Browse Catalog
+              Discover {content === "movie" ? "Movies" : "TV Series"}
             </Button>
           </div>
         )}
@@ -322,16 +340,16 @@ const LibraryList = () => {
         title={`Clear ${content === "movie" ? "Movies" : "TV Shows"}?`}
         isOpen={opened}
         onClose={close}
-        onConfirm={confirmClearWatchlist}
+        onConfirm={confirmClear}
         confirmLabel="Clear All"
-        isLoading={clearWatchlistMutation.isPending}
+        isLoading={clearMutation.isPending}
       >
         <p>
           Are you sure you want to remove all {content === "movie" ? "movies" : "TV shows"} from
-          your watchlist? This action cannot be undone.
+          your {activeTab}? This action cannot be undone.
         </p>
         <p className="text-default-500 text-sm">
-          {sortedWatchlist.length} {sortedWatchlist.length === 1 ? "item" : "items"} will be
+          {sortedItems.length} {sortedItems.length === 1 ? "item" : "items"} will be
           removed.
         </p>
       </ConfirmationModal>
