@@ -1,9 +1,7 @@
+"use client";
+
 import AuthForms from "@/components/sections/Auth/Forms";
-import { NextPage } from "next";
-import React from "react";
 
-const AuthResetPasswordPage: NextPage = () => {
+export default function AuthResetPasswordPage() {
   return <AuthForms />;
-};
-
-export default AuthResetPasswordPage;
+}
