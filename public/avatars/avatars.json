@@ -1,0 +1,26 @@
+[
+  {
+    "id": "red",
+    "name": "Red",
+    "url": "https://snapflix.indevs.in/images/avatars/avatar_red.png",
+    "color": "#E50914"
+  },
+  {
+    "id": "yellow",
+    "name": "Yellow",
+    "url": "https://snapflix.indevs.in/images/avatars/avatar_yellow.png",
+    "color": "#FFB800"
+  },
+  {
+    "id": "blue",
+    "name": "Blue",
+    "url": "https://snapflix.indevs.in/images/avatars/avatar_blue.png",
+    "color": "#00B4D8"
+  },
+  {
+    "id": "grey",
+    "name": "Grey",
+    "url": "https://snapflix.indevs.in/images/avatars/avatar_grey.png",
+    "color": "#8E9AAF"
+  }
+]
